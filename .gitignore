@@ -1,0 +1,8 @@
+*.omc
+.omakedb*
+*~
+doca.custom
+doca
+*.o
+*.cmi
+*.cmo

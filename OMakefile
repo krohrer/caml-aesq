@@ -1,0 +1,164 @@
+########################################################################
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this file, to deal in the File without
+# restriction, including without limitation the rights to use,
+# copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the File, and to permit persons to whom the
+# File is furnished to do so, subject to the following condition:
+#
+# THE FILE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE FILE OR
+# THE USE OR OTHER DEALINGS IN THE FILE.
+
+public.OCamlTop(name, files) =
+   # Copied and adapted from OCamlProgram in OCaml.om
+   protected.CMOFILES  = $(addsuffix .cmo, $(files))
+
+   protected.CMAFILES  = $(addsuffix .cma,  $(OCAML_LIBS))
+   protected.CMA_OTHER_FILES = $(addsuffix .cma, $(OCAML_OTHER_LIBS))
+
+   protected.CLIBS = $(addsuffix $(EXT_LIB), $(OCAML_CLIBS))
+
+   protected.name = $(file $(name))
+
+   protected.PROG  = $(file $(name))
+   protected.BYTETOP = $(file $(name).custom)
+
+   OCAMLFINDFLAGS += -linkpkg
+   OCAML_BYTE_LINK_FLAGS += -custom
+
+   #
+   # Rules to build byte-code and native targets
+   #
+   $(BYTETOP): $(CMAFILES) $(CMOFILES) $(CLIBS)
+        $(OCAMLFIND) $(OCAMLMKTOP) $(LAZY_OCAMLFINDFLAGS) $(PREFIXED_OCAMLPACKS) $(OCAMLFLAGS) $(OCAMLCFLAGS)\
+                $(PREFIXED_OCAMLINCLUDES) $(OCAML_BYTE_LINK_FLAGS)\
+                -o $@ $(CMA_OTHER_FILES) $(CMAFILES) $(OCamlLinkSort $(CMOFILES))\
+                $(CLIBS) $(OCAML_LINK_FLAGS)
+
+   protected.PREFIXED_OCAMLPACK_INCLUDES =\
+	$(if $(and $(USE_OCAMLFIND) $(gt $(length $(OCAMLPACKS)), 0)),\
+	$(mapprefix -I,$(shell $(OCAMLFIND) query $(OCAMLPACKS))),\
+	$(EMPTY))
+
+   #
+   # Link the actual executables.
+   # Always prefer native executables.
+   #
+   $(PROG): $(BYTETOP)
+	echo "#!/bin/sh" > $@
+	echo "exec $(dirname \$@)/"$< $(PREFIXED_OCAMLINCLUDES) $(PREFIXED_OCAMLPACK_INCLUDES) \$@ >> $@
+	chmod a+x $@
+
+   return $(array $(PROG), $(BYTETOP))
+
+########################################################################
+# Phony targets are scoped, so you probably want to declare them first.
+#
+
+.PHONY: all run clean
+.DEFAULT: all
+
+########################################################################
+# Subdirectories.
+# You may want to include some subdirectories in this project.
+# If so, define the subdirectory targets and uncomment this section.
+#
+
+# .SUBDIRS:
+
+########################################################################
+# OCaml configuration.
+# Delete this section if you are not building OCaml files.
+#
+
+################################################
+# Configuration.  You may want to modify any of these configuration
+# variables.
+#
+
+#
+# This project requires ocamlfind (default - false).
+#
+USE_OCAMLFIND = true
+
+OCAMLPACKS[] =
+	extlib
+
+if $(not $(OCAMLFIND_EXISTS))
+    eprintln(This project requires ocamlfind, but is was not found.)
+    eprintln(You need to install ocamlfind and run "omake --configure".)
+    exit 1
+
+#
+# Include path
+#
+OCAMLINCLUDES +=
+
+#
+# Compile native or byte code? 
+#
+# The default values are defined as follows:
+#
+NATIVE_ENABLED = $(OCAMLOPT_EXISTS)
+BYTE_ENABLED = yes
+
+#
+# Various options
+#
+OCAMLFLAGS    +=
+OCAMLCFLAGS   +=
+OCAMLOPTFLAGS +=
+OCAML_LINK_FLAGS +=
+OCAML_BYTE_LINK_FLAGS +=
+OCAML_NATIVE_LINK_FLAGS +=
+
+################################################
+# Generated files
+#
+# Workaround for the fact that ocamldep does not pay attention to .mll
+# and .mly files.
+#
+# OCamlGeneratedFiles(parser.ml lexer.ml)
+
+################################################
+# Build an OCaml library
+#
+
+# FILES[] =
+#    file1
+#    file2
+#
+# LIB = main
+#
+# .DEFAULT: $(OCamlLibrary $(LIB), $(FILES))
+
+################################################
+# Build an OCaml program
+#
+
+FILES[] =
+    doca
+
+PROGRAM = doca
+OCAML_LIBS +=
+OCAML_CLIBS +=
+OCAML_OTHER_LIBS +=
+OCAML_LIB_FLAGS +=
+
+TOP = $(OCamlTop $(PROGRAM), $(FILES))
+
+all: $(TOP)
+
+run: $(TOP)
+	$<
+
+clean:
+	rm -f \
+	$(filter-proper-targets $(glob $(addsuffix .*, $(FILES)))) \
+	$(PROGRAM) \
+	*~
