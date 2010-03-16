@@ -68,6 +68,50 @@ let localize l lns = List.assoc l lns
 (** Printing *)
 (*----------------------------------------------------------------------------*)
 
+type printer = document -> unit
+
+let print pr doc = pr doc
+
+module ANSI :
+sig
+  type linel =
+      Textel of string
+    | Space of int
+    | OpenTag of tag
+    | CloseTag
+  type line = linel list
+
+  val make_printer : ?offset:int -> ?width:int -> out_channel -> printer
+end =
+struct
+  type linel =
+      Textel of string
+    | Space of int
+    | OpenTag of tag
+    | CloseTag
+
+  type line = linel list
+
+  let print_textel outc string = 
+    output_string outc string
+
+  let print_space outc len =
+    for i = 0 to len-1 do
+      output_string outc " "
+    done
+
+  let print_newline outc () =
+    output_string outc "\n"
+
+  let normalize ~offset ~width outc =
+    function
+	_ -> print_newline outc ()
+
+  let make_printer ?(offset=0) ?(width=78) outc =
+    fun document ->
+      normalize ~offset ~width outc document.doc_root
+end
+
 open Printf
 open Format
 
@@ -145,5 +189,3 @@ let ansi_printer ?width fmt document =
   let tag_functions = ansi_tag_functions in
     format_printer ?width ~tag_functions fmt document
 
-type printer = document -> unit
-let print pr doc = pr doc
