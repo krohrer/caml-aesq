@@ -15,11 +15,13 @@ let tagstr =
     | `blink -> "blink"
     | `code -> "code"
 
+type justification = [`left | `center | `right | `block]
+
 type node' =
     Text of string
   | Break
   | Seq of node' list
-  | Justified of [`left] * node'
+  | Justified of justification * node'
   | Tagged of tag * node'
   | Section of node' * node'
   | Table of node' * node' list list
