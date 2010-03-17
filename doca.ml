@@ -72,25 +72,54 @@ type printer = document -> unit
 
 let print pr doc = pr doc
 
+(*----------------------------------------------------------------------------*)
+(** ANSI Text Output *)
+(*----------------------------------------------------------------------------*)
+
 module ANSI :
 sig
-  type linel =
-      Textel of string
-    | Space of int
-    | OpenTag of tag
-    | CloseTag
-  type line = linel list
-
-  val make_printer : ?offset:int -> ?width:int -> out_channel -> printer
 end =
 struct
-  type linel =
-      Textel of string
-    | Space of int
-    | OpenTag of tag
-    | CloseTag
+  open Printf
+  open Format
+  open ExtLib
 
-  type line = linel list
+  type textel =
+      TTextel of string
+    | TSpace of int
+    | TOpenTag of tag
+    | TCloseTag
+    | TNewline
+    | TLazySeq of textel list lazy_t
+
+  let rec print_textel_stream fmt =
+    function
+	TTextel s -> pp_print_string fmt s
+      | TSpace n -> for i = 0 to n-1 do pp_print_string fmt " " done
+      | TOpenTag t -> pp_open_tag fmt t
+      | TCloseTag -> pp_close_tag fmt ()
+      | TNewline -> pp_print_newline fmt ()
+      | TLazySeq ls -> List.iter (print_textel_stream fmt) (Lazy.force ls)
+
+  let ansi_tag =
+    let esc s = sprintf "\x1b[%sm" s in
+    let either yes no = fun f -> if f then esc yes else esc no in
+    let lut = List.map (fun (t,e) -> tagstr t, e) [
+	  `verb,  either "1" "22";
+	  `emph,  either "4" "24";
+	  `blink, either "6" "25";
+	  `code,  either "37" "39";
+	]
+    in
+      fun opens tag ->
+	try (List.assoc tag lut) opens with Not_found -> either "9" "29" opens
+
+  let ansi_tag_functions = {
+    mark_open_tag = ansi_tag true;
+    mark_close_tag = ansi_tag false;
+    print_open_tag = ignore;
+    print_close_tag = ignore
+  }
 
   let print_textel outc string = 
     output_string outc string
@@ -103,14 +132,24 @@ struct
   let print_newline outc () =
     output_string outc "\n"
 
-  let normalize ~offset ~width outc =
+  let rec normalize ~offset ~width =
     function
-	_ -> print_newline outc ()
+	Text s -> TTextel s
+      | Break -> TNewline
+      | Seq ns -> TLazySeq (lazy (List.map (normalize ~offset ~width) ns))
+      | Justified (j,n) -> normalize ~offset ~width n
+      | Tagged (t,n) -> TLazySeq (lazy [TOpenTag (tagstr t); normalize ~offset ~width n; TCloseTag])
+      | Section (title,body) -> TLazySeq (lazy [])
+      | Table (caption,body) -> TLazySeq (lazy [])
 
   let make_printer ?(offset=0) ?(width=78) outc =
-    fun document ->
-      normalize ~offset ~width outc document.doc_root
+    let fmt = std_formatter in
+      fun document ->
+	let textel_stream = normalize ~offset ~width document.doc_root in
+	  print_textel_stream fmt textel_stream
 end
+
+(*----------------------------------------------------------------------------*)
 
 open Printf
 open Format
