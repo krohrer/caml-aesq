@@ -132,20 +132,60 @@ struct
   let print_newline outc () =
     output_string outc "\n"
 
-  let rec normalize ~offset ~width =
+  type context = {
+    c_offset : int;
+    c_width : int
+  }
+
+  let make_context ~offset ~width = {
+    c_offset = offset;
+    c_width = width
+  }
+
+  let split_context ctx sizes = 
+    let rec fold offset revctxs =
+      function
+	| [] -> revctxs
+	| x::rest ->
+	    let revctxs' = (make_context ~offset ~width:x)::revctxs in
+	      fold (offset + x) revctxs' rest
+    in
+      List.rev (fold ctx.c_offset [] sizes)
+
+  let indent_context ctx delta = {
+    ctx with c_offset = ctx.c_offset + delta 
+  }
+
+  let rec normalize ctx =
     function
-	Text s -> TTextel s
+	Text t -> norm_text ctx t
       | Break -> TNewline
-      | Seq ns -> TLazySeq (lazy (List.map (normalize ~offset ~width) ns))
-      | Justified (j,n) -> normalize ~offset ~width n
-      | Tagged (t,n) -> TLazySeq (lazy [TOpenTag (tagstr t); normalize ~offset ~width n; TCloseTag])
-      | Section (title,body) -> TLazySeq (lazy [])
-      | Table (caption,body) -> TLazySeq (lazy [])
+      | Seq ns -> norm_seq ctx ns
+      | Justified (j,n) -> norm_just ctx j n
+      | Tagged (t,n) -> norm_tagged ctx t n
+      | Section (title,body) -> norm_section ctx title body
+      | Table (caption,rowscols) -> norm_table ctx caption rowscols
+  and norm_text ctx t =
+    TTextel t
+  and norm_seq ctx ns =
+    TLazySeq (lazy (List.map (normalize ctx) ns))
+  and norm_just ctx j n =
+    normalize ctx n
+  and norm_tagged ctx t n =
+    TLazySeq (lazy [TOpenTag (tagstr t); normalize ctx n; TCloseTag])
+  and norm_section ctx title body =
+    TLazySeq (lazy [])
+  and norm_table ctx caption body =
+    TLazySeq (lazy [])
 
   let make_printer ?(offset=0) ?(width=78) outc =
-    let fmt = std_formatter in
+    let fmt = formatter_of_out_channel outc in
+      pp_set_margin fmt width;
+      pp_set_tags fmt true;
+      pp_set_formatter_tag_functions fmt ansi_tag_functions;
       fun document ->
-	let textel_stream = normalize ~offset ~width document.doc_root in
+	let context = make_context ~offset ~width in
+	let textel_stream = normalize context document.doc_root in
 	  print_textel_stream fmt textel_stream
 end
 
