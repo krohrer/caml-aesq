@@ -78,6 +78,113 @@ let print pr doc = pr doc
 (** ANSI Text Output *)
 (*----------------------------------------------------------------------------*)
 
+module ANSIContext :
+sig
+  type t
+end =
+struct
+  open Printf
+  open Format
+
+  type output =
+    | OString of string
+    | OOpenTag of tag
+    | OCloseTag of tag
+    | OSpace of int
+    | OConc of int * output * output
+  type line_stream = Nil | Cons of output * (unit -> line_stream)
+
+  type t = {
+    c_offset : int;
+    c_width : int;
+    mutable c_pos : int;
+    mutable c_tags : tag list;
+  }
+
+  (*------------------------------------*)
+  
+  let make ~offset ~width = {
+    c_offset = offset;
+    c_width = width;
+    c_pos = 0;
+    c_tags = []
+  }
+
+  let splitn ctx sizes =
+    let rec fold offset revctxs =
+      function
+	| [] -> revctxs
+	| x::rest ->
+	    let revctxs' = (make ~offset ~width:x)::revctxs in
+	      fold (offset + x) revctxs' rest
+    in
+      List.rev (fold ctx.c_offset [] sizes)
+
+  let indent ctx delta = {
+    ctx with c_offset = ctx.c_offset + delta 
+  }
+
+  let rem_length ctx =
+    ctx.c_width - ctx.c_pos
+
+  let push_tag ctx t =
+    ctx.c_tags <- t :: ctx.c_tags
+
+  let pop_tag ctx () =
+    match ctx.c_tags with
+      | [] ->
+	  failwith "Doca.ANSIContext.ctx_pop_tag"
+      | x::rest ->
+	  ctx.c_tags <- rest;
+	  x
+
+  let tags ctx =
+    ctx.c_tags
+
+  let reset_pos ctx =
+    ctx.c_pos <- 0
+
+  (*------------------------------------*)
+
+  let ansi_tag =
+    let esc s = sprintf "\x1b[%sm" s in
+    let either yes no = fun f -> if f then esc yes else esc no in
+    let lut = [
+      `verb,  either "1" "22";
+      `emph,  either "4" "24";
+      `blink, either "6" "25";
+      `code,  either "37" "39";
+    ]
+    in
+      fun opens tag ->
+	try (List.assoc tag lut) opens with Not_found -> either "9" "29" opens
+
+
+  (* let p_string ctx s = *)
+  (* let lines_from_char_enum ctx pos ce = *)
+  (* let rec lines ctx = *)
+  (*   function *)
+  (* 	Text t -> lines_from_text ctx t *)
+  (*     | Break -> lines_from_break ctx () *)
+  (*     | Seq ns -> lines_from_seq ctx ns *)
+  (*     | Justified (j,n) -> lines_from_just ctx j n *)
+  (*     | Tagged (t,n) -> lines_from_tagged ctx t n *)
+  (*     | Section (title,body) -> lines_from_section ctx title body *)
+  (*     | Table (caption,rowscols) -> lines_from_table ctx caption rowscols *)
+  (* and lines_from_text ctx t = *)
+  (*   TTextel t *)
+  (* and norm_seq ctx ns = *)
+  (*   TLazySeq (lazy (List.map (normalize ctx) ns)) *)
+  (* and norm_just ctx j n = *)
+  (*   normalize ctx n *)
+  (* and norm_tagged ctx t n = *)
+  (*   TLazySeq (lazy [TOpenTag (tagstr t); normalize ctx n; TCloseTag]) *)
+  (* and norm_section ctx title body = *)
+  (*   TLazySeq (lazy []) *)
+  (* and norm_table ctx caption body = *)
+  (*   TLazySeq (lazy []) *)
+end
+
 module ANSI :
 sig
 end =
