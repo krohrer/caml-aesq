@@ -7,21 +7,33 @@
 type text = [`text]
 type elem = [`elem|text]
 
-type tag = [`emph | `verb | `blink | `code]
+type justification = 
+    [ `left
+    | `center 
+    | `right 
+    | `block
+    ]
+
+type tag =
+    [ `emph
+    | `verb 
+    | `blink
+    | `code
+    | `justify of justification
+    ]
+
 let tagstr =
   function
     | `emph -> "emph"
     | `verb -> "verb"
     | `blink -> "blink"
     | `code -> "code"
-
-type justification = [`left | `center | `right | `block]
+    | `justify j -> "blink"
 
 type node' =
     Text of string
   | Break
   | Seq of node' list
-  | Justified of justification * node'
   | Tagged of tag * node'
   | Section of node' * node'
   | Table of node' * node' list list
@@ -45,7 +57,7 @@ let document ?author ?header ?footer nodes = {
 let text s = Text s
 let break = Break
 let tagged t n = Tagged (t, n)
-let justified j n = Justified (j,n)
+let justified j n = Tagged (`justify j,n)
 let emph n = tagged `emph n
 let verb n = tagged `verb n
 let blink n = tagged `blink n
@@ -87,12 +99,11 @@ struct
   open Format
 
   type output =
-    | OString of string
+    | OSubString of string
     | OOpenTag of tag
     | OCloseTag of tag
     | OSpace of int
     | OConc of int * output * output
-  type line_stream = Nil | Cons of output * (unit -> line_stream)
 
   type t = {
     c_offset : int;
@@ -124,8 +135,8 @@ struct
     ctx with c_offset = ctx.c_offset + delta 
   }
 
-  let rem_length ctx =
-    ctx.c_width - ctx.c_pos
+  let tags ctx =
+    ctx.c_tags
 
   let push_tag ctx t =
     ctx.c_tags <- t :: ctx.c_tags
@@ -138,12 +149,26 @@ struct
 	  ctx.c_tags <- rest;
 	  x
 
-  let tags ctx =
-    ctx.c_tags
+  let rem_length ctx =
+    ctx.c_width - ctx.c_pos
+
+  let pos ctx =
+    ctx.c_pos
 
   let reset_pos ctx =
     ctx.c_pos <- 0
 
+  (*------------------------------------*)
+
+  let rec lines_from_node ctx =
+    function
+	Text t -> Stream.empty
+      | Break -> Stream.empty
+      | Seq ns -> Stream.empty
+      | Tagged (t,n) -> Stream.empty
+      | Section (title,body) -> Stream.empty
+      | Table (caption,rowscols) -> Stream.empty
+	      
   (*------------------------------------*)
 
   let ansi_tag =
@@ -158,8 +183,7 @@ struct
     in
       fun opens tag ->
 	try (List.assoc tag lut) opens with Not_found -> either "9" "29" opens
-
-
+	  
   (* let p_string ctx s = *)
   (* let lines_from_char_enum ctx pos ce = *)
   (* let rec lines ctx = *)
@@ -270,7 +294,6 @@ struct
 	Text t -> norm_text ctx t
       | Break -> TNewline
       | Seq ns -> norm_seq ctx ns
-      | Justified (j,n) -> norm_just ctx j n
       | Tagged (t,n) -> norm_tagged ctx t n
       | Section (title,body) -> norm_section ctx title body
       | Table (caption,rowscols) -> norm_table ctx caption rowscols
@@ -278,8 +301,6 @@ struct
     TTextel t
   and norm_seq ctx ns =
     TLazySeq (lazy (List.map (normalize ctx) ns))
-  and norm_just ctx j n =
-    normalize ctx n
   and norm_tagged ctx t n =
     TLazySeq (lazy [TOpenTag (tagstr t); normalize ctx n; TCloseTag])
   and norm_section ctx title body =
@@ -332,8 +353,6 @@ let pp_print_document fmt doc =
 	  List.iter (pp fmt) s
       | Break ->
 	  pp_print_string fmt "\n"
-      | Justified (j, n) ->
-	  pp fmt n
       | Tagged (t, n) ->
 	  pp_open_tag fmt (tagstr t);
 	  pp fmt n;
