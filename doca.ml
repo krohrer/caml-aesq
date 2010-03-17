@@ -90,309 +90,143 @@ let print pr doc = pr doc
 (** ANSI Text Output *)
 (*----------------------------------------------------------------------------*)
 
-module ANSIContext :
-sig
-  type t
-end =
+module ANSI =
 struct
-  open Printf
-  open Format
+  type ansiop = [ `nop
+  ]
 
-  type output =
-    | OSubString of string
-    | OOpenTag of tag
-    | OCloseTag of tag
-    | OSpace of int
-    | OConc of int * output * output
+  type simpleop = [
+  | `frag of string
+  | `ansi of ansiop
+  ]
 
-  type t = {
+  type op = [
+  | simpleop
+  | `break
+  | `withctx of context * op Stream.t
+  ]
+
+  and color = [
+    `black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default | `high of color
+  ]
+
+  and intensity = [
+    `bold | `faint | `normal
+  ]
+
+  and context = {
     c_offset : int;
     c_width : int;
-    mutable c_pos : int;
-    mutable c_tags : tag list;
+    c_depth : int;
+    mutable c_intensity : intensity list;
+    mutable c_underline : bool list;
+    mutable c_inverted : bool list;
+    mutable c_foreground : color list;
+    mutable c_background : color list;
+  }
+
+  and printer = {
+    mutable p_context : context;
+    mutable p_column : int;
+    mutable p_queue_count : int;
+    p_queue : simpleop Queue.t
   }
 
   (*------------------------------------*)
-  
-  let make ~offset ~width = {
-    c_offset = offset;
-    c_width = width;
-    c_pos = 0;
-    c_tags = []
-  }
 
-  let splitn ctx sizes =
-    let rec fold offset revctxs =
-      function
-	| [] -> revctxs
-	| x::rest ->
-	    let revctxs' = (make ~offset ~width:x)::revctxs in
-	      fold (offset + x) revctxs' rest
-    in
-      List.rev (fold ctx.c_offset [] sizes)
+  module Context =
+  struct
+    let make 
+	?(offset=0) ?(width=78) ?(depth=0)
+	?(intensity=`normal)
+	?(underline=false)
+	?(inverted=false)
+	?(foreground=`default)
+	?(background=`default)
+	()= {
+	  c_offset = offset;
+	  c_width = width;
+	  c_depth = depth;
+	  c_intensity = [intensity];
+	  c_underline = [underline];
+	  c_inverted = [inverted];
+	  c_foreground = [foreground];
+	  c_background = [background];
+	}
 
-  let indent ctx delta = {
-    ctx with c_offset = ctx.c_offset + delta 
-  }
+    let child ~offset ~width ctx = {
+      ctx with 
+	c_offset = offset;
+	c_width = width;
+	c_depth = succ ctx.c_depth 
+    }
 
-  let tags ctx =
-    ctx.c_tags
+    let offset ctx = ctx.c_offset
+    let width ctx = ctx.c_width
+    let depth ctx = ctx.c_depth
 
-  let push_tag ctx t =
-    ctx.c_tags <- t :: ctx.c_tags
+    let intensity ctx  = List.tl ctx.c_intensity
+    let underlines ctx = List.tl ctx.c_underline
+    let inverted ctx   = List.tl ctx.c_inverted
+    let foreground ctx = List.tl ctx.c_foreground
+    let background ctx = List.tl ctx.c_background
 
-  let pop_tag ctx () =
-    match ctx.c_tags with
-      | [] ->
-	  failwith "Doca.ANSIContext.ctx_pop_tag"
-      | x::rest ->
-	  ctx.c_tags <- rest;
-	  x
+    let push_intensity ctx i  = ctx.c_intensity  <- i::ctx.c_intensity
+    let push_underline ctx f  = ctx.c_underline  <- f::ctx.c_underline
+    let push_inverted ctx f   = ctx.c_inverted   <- f::ctx.c_inverted
+    let push_foreground ctx c = ctx.c_foreground <- c::ctx.c_foreground
+    let push_foreground ctx c = ctx.c_foreground <- c::ctx.c_foreground
 
-  let rem_length ctx =
-    ctx.c_width - ctx.c_pos
-
-  let pos ctx =
-    ctx.c_pos
-
-  let reset_pos ctx =
-    ctx.c_pos <- 0
+    let pop_intensity ctx  = ctx.c_intensity  <- List.tl ctx.c_intensity
+    let pop_underline ctx  = ctx.c_underline  <- List.tl ctx.c_underline
+    let pop_inverted ctx   = ctx.c_inverted   <- List.tl ctx.c_inverted
+    let pop_foreground ctx = ctx.c_foreground <- List.tl ctx.c_foreground
+    let pop_background ctx = ctx.c_background <- List.tl ctx.c_background
+  end
 
   (*------------------------------------*)
 
-  let rec lines_from_node ctx =
-    function
-	Text t -> Stream.empty
-      | Break -> Stream.empty
-      | Seq ns -> Stream.empty
-      | Tagged (t,n) -> Stream.empty
-      | Section (title,body) -> Stream.empty
-      | Table (caption,rowscols) -> Stream.empty
-	      
-  (*------------------------------------*)
+  module Printer =
+  struct
+    let make ctx = {
+      p_context = ctx;
+      p_column = 0;
+      p_queue_count = 0;
+      p_queue = Queue.create ()
+    }
 
-  let ansi_tag =
-    let esc s = sprintf "\x1b[%sm" s in
-    let either yes no = fun f -> if f then esc yes else esc no in
-    let lut = [
-      `verb,  either "1" "22";
-      `emph,  either "4" "24";
-      `blink, either "6" "25";
-      `code,  either "37" "39";
-    ]
-    in
-      fun opens tag ->
-	try (List.assoc tag lut) opens with Not_found -> either "9" "29" opens
-	  
-  (* let p_string ctx s = *)
-  (* let lines_from_char_enum ctx pos ce = *)
-  (* let rec lines ctx = *)
-  (*   function *)
-  (* 	Text t -> lines_from_text ctx t *)
-  (*     | Break -> lines_from_break ctx () *)
-  (*     | Seq ns -> lines_from_seq ctx ns *)
-  (*     | Justified (j,n) -> lines_from_just ctx j n *)
-  (*     | Tagged (t,n) -> lines_from_tagged ctx t n *)
-  (*     | Section (title,body) -> lines_from_section ctx title body *)
-  (*     | Table (caption,rowscols) -> lines_from_table ctx caption rowscols *)
-  (* and lines_from_text ctx t = *)
-  (*   TTextel t *)
-  (* and norm_seq ctx ns = *)
-  (*   TLazySeq (lazy (List.map (normalize ctx) ns)) *)
-  (* and norm_just ctx j n = *)
-  (*   normalize ctx n *)
-  (* and norm_tagged ctx t n = *)
-  (*   TLazySeq (lazy [TOpenTag (tagstr t); normalize ctx n; TCloseTag]) *)
-  (* and norm_section ctx title body = *)
-  (*   TLazySeq (lazy []) *)
-  (* and norm_table ctx caption body = *)
-  (*   TLazySeq (lazy []) *)
-end
+    let queue_frag pr (`frag s as f) =
+      pr.p_queue_count <- pr.p_queue_count + (String.length s);
+      Queue.add f pr.p_queue
 
-module ANSI :
-sig
-end =
-struct
-  open Printf
-  open Format
-  open ExtLib
+    let queue_ansi pr (`ansi o as a) =
+      Queue.add a pr.p_queue
 
-  type textel =
-      TTextel of string
-    | TSpace of int
-    | TOpenTag of tag
-    | TCloseTag
-    | TNewline
-    | TLazySeq of textel list lazy_t
+    let flush_queue pr ctx =
+      if ctx.c_depth = 0 then
+	()
 
-  let rec print_textel_stream fmt =
-    function
-	TTextel s -> pp_print_string fmt s
-      | TSpace n -> for i = 0 to n-1 do pp_print_string fmt " " done
-      | TOpenTag t -> pp_open_tag fmt t
-      | TCloseTag -> pp_close_tag fmt ()
-      | TNewline -> pp_print_newline fmt ()
-      | TLazySeq ls -> List.iter (print_textel_stream fmt) (Lazy.force ls)
-
-  let ansi_tag =
-    let esc s = sprintf "\x1b[%sm" s in
-    let either yes no = fun f -> if f then esc yes else esc no in
-    let lut = List.map (fun (t,e) -> tagstr t, e) [
-	  `verb,  either "1" "22";
-	  `emph,  either "4" "24";
-	  `blink, either "6" "25";
-	  `code,  either "37" "39";
-	]
-    in
-      fun opens tag ->
-	try (List.assoc tag lut) opens with Not_found -> either "9" "29" opens
-
-  let ansi_tag_functions = {
-    mark_open_tag = ansi_tag true;
-    mark_close_tag = ansi_tag false;
-    print_open_tag = ignore;
-    print_close_tag = ignore
-  }
-
-  let print_textel outc string = 
-    output_string outc string
-
-  let print_space outc len =
-    for i = 0 to len-1 do
-      output_string outc " "
-    done
-
-  let print_newline outc () =
-    output_string outc "\n"
-
-  type context = {
-    c_offset : int;
-    c_width : int
-  }
-
-  let make_context ~offset ~width = {
-    c_offset = offset;
-    c_width = width
-  }
-
-  let split_context ctx sizes = 
-    let rec fold offset revctxs =
-      function
-	| [] -> revctxs
-	| x::rest ->
-	    let revctxs' = (make_context ~offset ~width:x)::revctxs in
-	      fold (offset + x) revctxs' rest
-    in
-      List.rev (fold ctx.c_offset [] sizes)
-
-  let indent_context ctx delta = {
-    ctx with c_offset = ctx.c_offset + delta 
-  }
-
-  let rec normalize ctx =
-    function
-	Text t -> norm_text ctx t
-      | Break -> TNewline
-      | Seq ns -> norm_seq ctx ns
-      | Tagged (t,n) -> norm_tagged ctx t n
-      | Section (title,body) -> norm_section ctx title body
-      | Table (caption,rowscols) -> norm_table ctx caption rowscols
-  and norm_text ctx t =
-    TTextel t
-  and norm_seq ctx ns =
-    TLazySeq (lazy (List.map (normalize ctx) ns))
-  and norm_tagged ctx t n =
-    TLazySeq (lazy [TOpenTag (tagstr t); normalize ctx n; TCloseTag])
-  and norm_section ctx title body =
-    TLazySeq (lazy [])
-  and norm_table ctx caption body =
-    TLazySeq (lazy [])
-
-  let make_printer ?(offset=0) ?(width=78) outc =
-    let fmt = formatter_of_out_channel outc in
-      pp_set_margin fmt width;
-      pp_set_tags fmt true;
-      pp_set_formatter_tag_functions fmt ansi_tag_functions;
-      fun document ->
-	let context = make_context ~offset ~width in
-	let textel_stream = normalize context document.doc_root in
-	  print_textel_stream fmt textel_stream
+    let switch_context pr ctx =
+      if pr.p_context != ctx then begin
+	()
+      end
+	
+    let rec print' pr ctx stream =
+      let consume =
+	function
+	  | `frag s as f ->
+	      switch_context pr ctx;
+	      queue_frag pr f
+	  | `ansi o as a ->
+	      switch_context pr ctx;
+	      queue_ansi pr a
+	  | `break -> 
+	      flush_queue pr ctx
+	  | `withctx (ctx, stream) ->
+	      print' pr ctx stream
+      in
+	Stream.iter consume stream
+  end
 end
 
 (*----------------------------------------------------------------------------*)
-
-open Printf
-open Format
-
-let ansi_tag opens tag =
-  let esc s = sprintf "\x1b[%sm" s in
-  let either yes no = if opens then esc yes else esc no in
-    try
-      List.assoc tag [
-	tagstr `verb,  either "1" "22";
-	tagstr `emph,  either "4" "24";
-	tagstr `blink, either "6" "25";
-	tagstr `code,  either "37" "39";
-      ]
-    with
-	Not_found -> either "9" "29"
-
-let ansi_tag_functions = {
-  mark_open_tag = ansi_tag true;
-  mark_close_tag = ansi_tag false;
-  print_open_tag = ignore;
-  print_close_tag = ignore
-}
-
-let pp_print_document fmt doc =
-  let rec pp fmt =
-    function 
-	Text t ->
-	  pp_print_string fmt t
-      | Seq s ->
-	  List.iter (pp fmt) s
-      | Break ->
-	  pp_print_string fmt "\n"
-      | Tagged (t, n) ->
-	  pp_open_tag fmt (tagstr t);
-	  pp fmt n;
-	  pp_close_tag fmt ()
-      | Section (title,body) ->
-	  pp_print_newline fmt ();
-	  pp fmt title;
-	  pp_print_newline fmt ();
-	  pp fmt body
-      | Table (caption,rowscols) ->
-	  pp fmt caption;
-	  List.iter (List.iter (pp fmt)) rowscols
-  in
-    pp fmt doc.doc_root
-
-let format_printer ?(width=78) ?tag_functions fmt document =
-  match tag_functions with
-    | None ->
-	pp_print_document fmt document
-    | Some tfs ->
-	(* Save state *)
-	let mark_tags = pp_get_mark_tags fmt () in
-	let formatter_tag_functions = pp_get_formatter_tag_functions fmt () in
-	  (* Set up custom state *)
-	  pp_print_newline fmt ();
-	  pp_set_tags fmt true;
-	  pp_set_mark_tags fmt true;
-	  pp_set_formatter_tag_functions fmt tfs;
-	  (* Print document *)
-	  pp_print_document fmt document;
-	  pp_print_newline fmt ();
-	  (* Restore state *)
-	  pp_set_tags fmt false;
-	  pp_set_mark_tags fmt mark_tags;
-	  pp_set_formatter_tag_functions fmt formatter_tag_functions
-
-let text_printer ?width fmt document =
-  format_printer ?width fmt document
-
-let ansi_printer ?width fmt document = 
-  let tag_functions = ansi_tag_functions in
-    format_printer ?width ~tag_functions fmt document
-

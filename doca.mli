@@ -43,9 +43,3 @@ val localize : 'l lang -> ('l lang * 'a) list -> 'a
 type printer
 val print : printer -> document -> unit
 
-(** text_printer *)
-val text_printer : ?width:int -> Format.formatter -> printer
-
-(** Use ANSI-Codes for prettier output *)
-val ansi_printer : ?width:int -> Format.formatter -> printer
-
