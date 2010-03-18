@@ -79,14 +79,6 @@ let language l = l
 let localize l lns = List.assoc l lns
 
 (*----------------------------------------------------------------------------*)
-(** Printing *)
-(*----------------------------------------------------------------------------*)
-
-type printer = document -> unit
-
-let print pr doc = pr doc
-
-(*----------------------------------------------------------------------------*)
 (** ANSI Text Output *)
 (*----------------------------------------------------------------------------*)
 
@@ -233,7 +225,7 @@ struct
   struct
     module C = Context
 
-    let make ctx outc = {
+    let make outc ctx = {
       p_outc = outc;
       p_context = ctx;
       p_column = 0;
@@ -254,7 +246,7 @@ struct
       Queue.add elem pr.p_queue
 
     let flush_queue pr ctx =
-      (*  *)
+      (* TODO *)
       if ctx.c_depth = 0 then
 	output_string pr.p_outc "\n"
  
@@ -357,7 +349,7 @@ struct
 	  end
 	end
 
-    let rec print' pr ctx stream =
+    let rec print pr ctx stream =
       let consume =
 	function
 	  | `frag _ as f ->
@@ -420,11 +412,25 @@ struct
 	      flush_queue pr ctx
 	  | `withctx (ctx', stream) ->
 	      switch_context pr ctx';
-	      print' pr ctx' stream;
+	      print pr ctx' stream;
 	      switch_context pr ctx 
       in
 	Stream.iter consume stream
   end
+
+  module Format =
+  struct
+    (* TODO : Stream creation from nodes*)
+    let format ctx node = Stream.sempty
+  end
+
+  let print ?offset ?width outc doc =
+    let ctx = Context.make ?offset ?width () in
+    let pr = Printer.make outc ctx in
+    let opstream = Format.format ctx doc.doc_root in
+      Printer.print pr ctx opstream
 end
+
+let ansi_print = ANSI.print
 
 (*----------------------------------------------------------------------------*)
