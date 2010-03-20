@@ -84,24 +84,13 @@ let localize l lns = List.assoc l lns
 
 module ANSI =
 struct
-  type op = [
-  | `push_intensity of intensity
-  | `push_justify of justify
-  | `push_underline of bool
-  | `push_inverted of bool
-  | `push_foreground of color
-  | `push_background of color
-  | `pop_intensity
-  | `pop_underline
-  | `pop_inverted
-  | `pop_foreground
-  | `pop_background
-  | `frag of string
-  | `break
-  | `withctx of context * op Stream.t
-  ]
+  type color = [`black|`red|`green|`yellow|`blue|`magenta|`cyan|`white|`default]
 
-  and elem = [
+  type intensity = [`bold|`faint|`normal]
+
+  type justify = [`left|`center|`right|`block]
+
+  type elem = [
   | `frag of string
   | `intensity of intensity
   | `justify of justify
@@ -111,44 +100,23 @@ struct
   | `background of color
   ]
 
-  and color = [
-    `black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default
-  ]
-
-  and intensity = [
-    `bold | `faint | `normal
-  ]
-
-  and justify = [
-    `left | `center | `right | `blco
-  ]
-
-  and context = {
-    c_offset : int;
-    c_width : int;
-    c_depth : int;
-    mutable c_intensity : intensity list;
-    mutable c_justify : justify list;
-    mutable c_underline : bool list;
-    mutable c_inverted : bool list;
-    mutable c_foreground : color list;
-    mutable c_background : color list;
-  }
-
-  and printer = {
-    p_outc : out_channel;
-    mutable p_context : context;
-    mutable p_column : int;
-    mutable p_queue_columns : int;
-    mutable p_queue_fragments : int;
-    p_queue : elem Queue.t
-  }
-
   (*------------------------------------*)
 
   module Context =
-  struct
-    let make 
+  struct 
+    type t = {
+      c_offset : int;
+      c_width : int;
+      c_depth : int;
+      mutable c_intensity : intensity list;
+      mutable c_justify : justify list;
+      mutable c_underline : bool list;
+      mutable c_inverted : bool list;
+      mutable c_foreground : color list;
+      mutable c_background : color list;
+    }
+
+   let make 
 	?(offset=0) ?(width=78) ?(depth=0)
 	?(intensity=`normal)
 	?(justify=`left)
@@ -225,6 +193,23 @@ struct
   struct
     module C = Context
 
+    type t = {
+      p_outc : out_channel;
+      mutable p_context : Context.t;
+      mutable p_column : int;
+      mutable p_queue_columns : int;
+      mutable p_queue_fragments : int;
+      p_queue : elem Queue.t
+    }
+
+    type op = [
+    | `opcode of (t -> unit)
+    | `frag of string
+    | `break
+    | `pushctx of Context.t
+    | `popctx
+    ]
+
     let make outc ctx = {
       p_outc = outc;
       p_context = ctx;
@@ -241,13 +226,12 @@ struct
       pr.p_queue_fragments <- pr.p_queue_fragments + 1;
       pr.p_queue_columns <- pr.p_queue_columns + (String.length s);
       Queue.add f pr.p_queue
-
     let queue_add pr elem =
       Queue.add elem pr.p_queue
 
     let flush_queue pr ctx =
       (* TODO *)
-      if ctx.c_depth = 0 then
+      if C.depth ctx = 0 then
 	output_string pr.p_outc "\n"
  
     let print_esc pr code =

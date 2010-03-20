@@ -142,7 +142,9 @@ OCAML_NATIVE_LINK_FLAGS +=
 #
 
 FILES[] =
+    ansi
     doca
+
 
 PROGRAM = doca
 OCAML_LIBS +=
