@@ -281,7 +281,7 @@ struct
       | _ -> true
 
   let justify just (width,stream) =
-    let rec collect_line linestart accum =
+    let rec collect_line accum =
       function
 	| SEmpty ->
 	    (* Justify what we have left *)
@@ -292,15 +292,9 @@ struct
 		| `linebreak ->
 		    (* Justify accumulated line *)
 		    transform_line accum stream
-		| `break ->
-		    if linestart then
-		      collect_line linestart accum stream
-		    else
-		      collect_line linestart (`break::accum) stream
-		| `fragment f ->
-		    collect_line false (`fragment f::accum) stream
-		| `ops ops ->
-		    collect_line linestart (`ops ops::accum) stream
+		| x ->
+		    (* Justify accumulated line *)
+		    collect_line (x::accum) stream
     and transform_line accum stream =
       let stats accum =
 	let rec fold break_count frag_size =
@@ -321,7 +315,7 @@ struct
 	ignore (stats accum);
 	SEmpty
     in
-      collect_line true [] stream
+      collect_line [] stream
 end
 
 (*----------------------------------------------------------------------------*)
