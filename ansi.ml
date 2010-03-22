@@ -277,33 +277,39 @@ struct
 
   let justify just (width,stream) =
     let rec collect_line accum_rev =
+      (* Collect non-linebreak elements for later justification *)
       function
 	| SEmpty ->
 	    (* Justify what we have left *)
-	    justify (List.rev accum_rev) stream
+	    justify_line (List.rev accum_rev) stream
 	| SCons (a, lstream) ->
 	    let stream = Lazy.force lstream in
 	      match a with
 		| `linebreak ->
 		    (* Justify accumulated line *)
-		    justify (List.rev accum_rev) stream
+		    justify_line (List.rev accum_rev) stream
 		| (`break as x)
 		| (`fragment _ as x)
 		| (`ops _ as x) ->
 		    (* Collect elements for current line *)
 		    collect_line (x::accum_rev) stream
     and justify_fix left_space right_space accum stream =
+      (* Justify with fixed space left and right *)
       let rec make_stream = function
 	| [] ->
+	    (* Space on the right *)
 	    SCons (`space right_space,
 		   lazy (collect_line [] stream))
 	| `break::rest ->
+	    (* Break is one space worth (fixed) *)
 	    SCons (`space 1,
 		   lazy (make_stream rest))
 	| (`fragment _ as x)::rest
 	| (`ops _ as x)::rest ->
+	    (* Passthrough for fragments and ops *)
 	    SCons (x, lazy (make_stream rest))
       in
+	(* Space on the left *)
 	SCons (`space left_space,
 	       lazy (make_stream accum))
     and justify_left rem_space =
@@ -314,20 +320,25 @@ struct
     and justify_right rem_space =
       justify_fix rem_space 0
     and justify_block breaks rem_space accum stream =
+      (* Justify space evenly for all breaks *)
       let rec make_stream a = function
 	| [] ->
 	    collect_line [] stream
 	| `break::rest ->
+	    (* Use integer arithmetic instead of float *)
 	    SCons (`space (a / breaks),
 		   lazy (make_stream (a mod breaks + rem_space) rest))
 	| (`fragment _ as x)::rest
 	| (`ops _ as x)::rest ->
+	    (* Passthrough for fragments and ops *)
 	    SCons (x,
 		   lazy (make_stream a rest))
       in
 	make_stream rem_space accum
-    and justify accum stream =
-      let breaks, rem_width = measure_line accum in
+    and justify_line accum stream =
+      (* Dispatch justification algorithm *)
+      let break_count, frag_len = measure_line accum in
+      let rem_width = max 0 (width - frag_len) in
 	match just with
 	  | `left ->
 	      justify_left rem_width accum stream
@@ -336,20 +347,21 @@ struct
 	  | `right ->
 	      justify_right rem_width accum stream
 	  | `block ->
-	      justify_block breaks rem_width accum stream
+	      justify_block break_count rem_width accum stream
     and measure_line accum =
-      let rec fold break_count rem_width =
+      (* Count breaks and measure fragment length *)
+      let rec fold break_count frag_len =
 	function
 	  | [] ->
-	      break_count, rem_width
+	      break_count, frag_len
 	  | `break::rest ->
-	      fold (break_count + 1) rem_width rest
+	      fold (break_count + 1) frag_len rest
 	  | `fragment f::rest ->
-	      fold break_count (rem_width + String.length f) rest
+	      fold break_count (frag_len + String.length f) rest
 	  | `ops ops::rest ->
-	      fold break_count rem_width rest
+	      fold break_count frag_len rest
       in
-	fold 0 width accum
+	fold 0 0 accum
     in
       collect_line [] stream
 end
