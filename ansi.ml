@@ -1,64 +1,81 @@
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
-type justify = [`left | `center | `right | `block ]
+type justification = [`left | `center | `right | `block ]
 type underline = [`single | `none]
+
+type context = {
+  mutable c_intensity : intensity;
+  mutable c_underline : underline;
+  mutable c_inverted : bool;
+  mutable c_foreground : color;
+  mutable c_background : color;
+}
 
 type t = {
   p_outc : out_channel;
-  mutable p_intensity : intensity;
-  mutable p_underline : underline;
-  mutable p_inverted : bool;
-  mutable p_foreground : color;
-  mutable p_background : color;
-  mutable p_active_intensity : intensity;
-  mutable p_active_underline : underline;
-  mutable p_active_inverted : bool;
-  mutable p_active_foreground : color;
-  mutable p_active_background : color
+  p_real : context;
+  p_default : context;
+  mutable p_active : context;
 }
 
-let make outc = {
-  p_outc = outc;
-
-  p_intensity = `normal;
-  p_underline = `none;
-  p_inverted = false;
-  p_foreground = `default;
-  p_background = `default;
-
-  p_active_intensity = `normal;
-  p_active_underline = `none;
-  p_active_inverted = false;
-  p_active_foreground = `default;
-  p_active_background = `default;
+let make_context () = {
+  c_intensity = `normal;
+  c_underline = `none;
+  c_inverted = false;
+  c_foreground = `default;
+  c_background = `default;
 }
+
+let copy_context ctx = {
+  c_intensity = ctx.c_intensity;
+  c_underline = ctx.c_underline;
+  c_inverted = ctx.c_inverted;
+  c_foreground = ctx.c_foreground;
+  c_background = ctx.c_background
+}
+
+let default_context p =
+  p.p_default
+
+let make outc =
+  let defctx = make_context () in {
+      p_outc = outc;
+      p_real = make_context ();
+      p_default = defctx;
+      p_active = defctx;
+    }
 
 let reset p () =
-  p.p_intensity <- `normal;
-  p.p_underline <- `none;
-  p.p_inverted <- false;
-  p.p_foreground <- `default;
-  p.p_background <- `default
+  let ctx = p.p_active in
+    ctx.c_intensity <- `normal;
+    ctx.c_underline <- `none;
+    ctx.c_inverted <- false;
+    ctx.c_foreground <- `default;
+    ctx.c_background <- `default
 
 let set_intensity p i =
-  p.p_intensity <- i
+  p.p_active.c_intensity <- i
   
 let set_underline p u = 
-  p.p_underline <- u
+  p.p_active.c_underline <- u
 
 let set_inverted p i =
-  p.p_inverted <- i
+  p.p_active.c_inverted <- i
 
 let set_foreground p c =
-  p.p_foreground <- c
+  p.p_active.c_foreground <- c
 
 let set_background p c =
-  p.p_background <- c
+  p.p_active.c_background <- c
+
+let set_context p ctx = 
+  p.p_active <- ctx
 
 let enforce_intensity p codes =
-  let i = p.p_intensity in
-    if i <> p.p_active_intensity then begin
-      p.p_active_intensity <- i;
+  let i = p.p_real.c_intensity in
+  let active = p.p_active in
+    if i <> active.c_intensity then begin
+      active.c_intensity <- i;
       let c =
 	match i with
 	  | `bold -> 1
@@ -70,9 +87,10 @@ let enforce_intensity p codes =
       codes
 
 let enforce_underline p codes =
-  let u = p.p_underline in
-    if u <> p.p_active_underline then begin
-      p.p_active_underline <- u;
+  let u = p.p_real.c_underline in
+  let active = p.p_active in
+    if u <> active.c_underline then begin
+      active.c_underline <- u;
       let c =
 	match u with
 	  | `single -> 4 
@@ -83,9 +101,10 @@ let enforce_underline p codes =
       codes
 
 let enforce_inverted p codes =
-  let i = p.p_inverted in
-    if i <> p.p_active_inverted then begin
-      p.p_active_inverted <- i;
+  let i = p.p_real.c_inverted in
+  let active = p.p_active in
+    if i <> active.c_inverted then begin
+      active.c_inverted <- i;
       let c = 
 	match i with
 	  | true -> 7
@@ -110,17 +129,19 @@ let color_code base c =
     code + base
 
 let enforce_foreground p codes =
-  let c = p.p_foreground in
-    if c <> p.p_active_foreground then begin
-      p.p_active_foreground <- c;
+  let c = p.p_real.c_foreground in
+  let active = p.p_active in
+    if c <> active.c_foreground then begin
+      active.c_foreground <- c;
       (color_code 30 c) :: codes
     end else
       codes
 
 let enforce_background p codes =
-  let c = p.p_background in
-    if c <> p.p_active_background then begin
-      p.p_active_background <- c;
+  let c = p.p_real.c_background in
+  let active = p.p_active in
+    if c <> active.c_background then begin
+      active.c_background <- c;
       (color_code 40 c) :: codes
     end else
       codes
@@ -172,87 +193,114 @@ let flush p () =
 
 (*----------------------------------------------------------------------------*)
 
-module Text :
-sig
-  type 'a stream_t = 
-    | SEmpty
-    | SCons of 'a * 'a stream_t lazy_t 
+open ExtLib
 
-  type op = [ 
-  | `set_intensity of intensity
-  | `set_underline of underline
-  | `set_inverted of bool
-  | `set_foreground of color
-  | `set_background of color
-  ]
+type 'a stream_t = 
+  | SEmpty
+  | SCons of 'a * 'a stream_t lazy_t 
 
-  val make_lines : width:int -> justify:justify ->
-    [ `fragment of string | `break | op ] stream_t ->
-    [ `fragment of string | `linebreak | op ] stream_t
-  (* val consume_line : width:int -> textel Stream.t -> textel Queue.t *)
-  (* val make_line_stream : width:int -> textel Stream.t -> textel Queue.t Stream.t *)
-end =
+type op = [ 
+| `set_intensity of intensity
+| `set_underline of underline
+| `set_inverted of bool
+| `set_foreground of color
+| `set_background of color
+| `set_context of context
+]
+
+module LineSeparation =
 struct
-  type 'a stream_t = 
-    | SEmpty
-    | SCons of 'a * 'a stream_t lazy_t 
+  type instream = [ `break | `fragment of string | `ops of op list] stream_t
+  type outstream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
 
-  let empty = SEmpty
-  let cons hd ltl = SCons (hd, ltl)
-
-  type op = [ 
-  | `set_intensity of intensity
-  | `set_underline of underline
-  | `set_inverted of bool
-  | `set_foreground of color
-  | `set_background of color
-  ]
-
-  let hyphen = "-"
-  let separator = "\\"
-
-  let make_lines ~width ~justify stream =
-    let rec line_splitter rem_width broken =
+  let separate_lines ~width stream =
+    let rec line_splitter rem_width =
       function
-	| SEmpty -> empty
+	| SEmpty ->
+	    (* Done *)
+	    SEmpty
 	| SCons (c, lstream) ->
-	    match c with
-	      | `fragment s ->
-		  empty
-	      | `break ->
-		  empty
-	      | op ->
-		  cons op (lazy (line_splitter rem_width broken (Lazy.force lstream)))
+	    let stream = Lazy.force lstream in
+	      match c with
+		| `fragment f ->
+		    (* Handle fragments separately *)
+		    split_fragment f rem_width stream
+		| `break ->
+		    if rem_width <= 2 then
+		      (* Break the line if not enough space left *)
+		      SCons (`linebreak,
+			     lazy (line_splitter width stream))
+		    else if rem_width = width then
+		      (* Ignore break at beginning of line *)
+		      line_splitter width stream
+		    else
+		      (* Insert a break *)
+		      SCons (`break,
+			     lazy (line_splitter (rem_width-1) stream))
+		| `ops ops ->
+		    (* Passthrough for ops *)
+		    SCons (`ops ops,
+			   lazy (line_splitter rem_width stream))
+    and split_fragment frag rem_width stream =
+      let flen = String.length frag in
+	if flen < rem_width then
+	  (* fragment still fits on this line *)
+	  SCons (`fragment frag,
+		 lazy (line_splitter (rem_width - flen) stream))
+	else if flen > width then
+	  (* fragment must be split anyway, may as well start on this line *)
+	  let left = String.slice ~last:rem_width frag in
+	  let right = String.slice ~first:rem_width frag in
+	    SCons (`fragment left,
+		   lazy (SCons (`linebreak,
+				lazy (split_fragment right width stream))))
+	else
+	  (* fragment fits on next line for sure *)
+	  SCons (`linebreak,
+		 lazy (split_fragment frag width stream))
     in
-      empty
+      line_splitter width stream
+end
 
-  (*   let flen = String.length *)
+module Justification =
+struct
+  type instream = LineSeparation.outstream
+  type outstream = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
-  (*   let flen = String.length frag in *)
-  (*     if flen > remwidth then *)
-  (* 	if flen > width then begin *)
-  (* 	  Queue.add (Fragment (String.sub 0 (width-1))) q; *)
-  (* 	  Queue.add (Fragment separator) *)
+  let justify just stream =
+    SEmpty
+end
 
-  (*     match Stream.peek with *)
-  (* 	| None -> q *)
-  (* 	| Some el -> *)
-  (* 	    begin match el with *)
-  (* 	      | Fragment t -> *)
-  (* 		  let tlen = String.length t in *)
-  (* 		    if tlen > rem then *)
-  (* 		      if tlen > width then *)
-  (* 			ExtString.slice  *)
-  (* 	      | Break *)
-  (* 	      | Set_intensity i *)
-  (* 	      | Set_underline u *)
-  (* 	      | Set_inverted i *)
-  (* 	      | Set_foreground f *)
-  (* 	      | Set_background b *)
-  (* 	    end *)
-  (*   in *)
-  (*     iter width *)
-
-  (* let make_line_stream ~width stream = *)
-  (*   Stream.sempty *)
+module Printer =
+struct
+  type instream = Justification.outstream
+  let rec print ansi =
+    function
+      | SEmpty -> ()
+      | SCons (a, lstream) ->
+	  let stream = Lazy.force lstream in
+	    match a with
+	      | `fragment f ->
+		  print_string ansi f;
+		  print ansi stream
+	      | `ops ops ->
+		  List.iter (print_ops ansi) ops;
+		  print ansi stream
+	      | `linebreak ->
+		  print_newline ansi ();
+		  print ansi stream
+  and print_ops ansi =
+    function
+      | `set_intensity i ->
+	  set_intensity ansi i
+      | `set_underline u ->
+	  set_underline ansi u
+      | `set_inverted i ->
+	  set_inverted ansi i
+      | `set_foreground c ->
+	  set_foreground ansi c
+      | `set_background c ->
+	  set_foreground ansi c
+      | `set_context ctx ->
+	  set_context ansi ctx
 end
