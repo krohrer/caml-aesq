@@ -46,12 +46,13 @@ let make outc =
     }
 
 let reset p () =
-  let ctx = p.p_active in
+  let ctx = p.p_default in
     ctx.c_intensity <- `normal;
     ctx.c_underline <- `none;
     ctx.c_inverted <- false;
     ctx.c_foreground <- `default;
-    ctx.c_background <- `default
+    ctx.c_background <- `default;
+    p.p_active <- ctx
 
 let set_intensity p i =
   p.p_active.c_intensity <- i
@@ -72,10 +73,10 @@ let set_context p ctx =
   p.p_active <- ctx
 
 let enforce_intensity p codes =
-  let i = p.p_real.c_intensity in
-  let active = p.p_active in
-    if i <> active.c_intensity then begin
-      active.c_intensity <- i;
+  let i = p.p_active.c_intensity in
+  let real = p.p_real in
+    if i <> real.c_intensity then begin
+      real.c_intensity <- i;
       let c =
 	match i with
 	  | `bold -> 1
@@ -87,10 +88,10 @@ let enforce_intensity p codes =
       codes
 
 let enforce_underline p codes =
-  let u = p.p_real.c_underline in
-  let active = p.p_active in
-    if u <> active.c_underline then begin
-      active.c_underline <- u;
+  let u = p.p_active.c_underline in
+  let real = p.p_real in
+    if u <> real.c_underline then begin
+      real.c_underline <- u;
       let c =
 	match u with
 	  | `single -> 4 
@@ -101,10 +102,10 @@ let enforce_underline p codes =
       codes
 
 let enforce_inverted p codes =
-  let i = p.p_real.c_inverted in
-  let active = p.p_active in
-    if i <> active.c_inverted then begin
-      active.c_inverted <- i;
+  let i = p.p_active.c_inverted in
+  let real = p.p_real in
+    if i <> real.c_inverted then begin
+      real.c_inverted <- i;
       let c = 
 	match i with
 	  | true -> 7
@@ -129,19 +130,19 @@ let color_code base c =
     code + base
 
 let enforce_foreground p codes =
-  let c = p.p_real.c_foreground in
-  let active = p.p_active in
-    if c <> active.c_foreground then begin
-      active.c_foreground <- c;
+  let c = p.p_active.c_foreground in
+  let real = p.p_real in
+    if c <> real.c_foreground then begin
+      real.c_foreground <- c;
       (color_code 30 c) :: codes
     end else
       codes
 
 let enforce_background p codes =
-  let c = p.p_real.c_background in
-  let active = p.p_active in
-    if c <> active.c_background then begin
-      active.c_background <- c;
+  let c = p.p_active.c_background in
+  let real = p.p_real in
+    if c <> real.c_background then begin
+      real.c_background <- c;
       (color_code 40 c) :: codes
     end else
       codes
@@ -186,7 +187,7 @@ let print_newline p () =
 let printf p fmt =
   enforce_attributes p ();
   Printf.ksprintf (print_string p) fmt
-    
+
 let flush p () =
   enforce_attributes p ();
   Pervasives.flush p.p_outc
@@ -373,21 +374,26 @@ module Printer =
 struct
   type input = [ `fragment of string | `ops of op list | `space of int | `linebreak ] Stream.t
   let rec print ansi stream =
-    try match Stream.next stream with
-      | `fragment f ->
-	  print_string ansi f;
-	  print ansi stream
-      | `ops ops ->
-	  List.iter (print_ops ansi) ops;
-	  print ansi stream
-      | `space n ->
-	  print_space ansi n;
-	  print ansi stream
-      | `linebreak ->
-	  print_newline ansi ();
-	  print ansi stream
-    with
-	Stream.Failure -> ()
+    prerr_string "= BEFORE =====================================================\n";
+    Gc.print_stat stderr;
+    begin
+      try while true do
+	match Stream.next stream with
+	  | `fragment f ->
+	      print_string ansi f
+	  | `ops ops ->
+	      List.iter (print_ops ansi) ops
+	  | `space n ->
+	      print_space ansi n
+	  | `linebreak ->
+	      print_newline ansi ()
+      done with
+	  Stream.Failure -> flush ansi ()
+    end;
+    prerr_string "= AFTER ======================================================\n";
+    Gc.full_major ();
+    Gc.compact ();
+    Gc.print_stat stderr
   and print_ops ansi =
     function
       | `set_intensity i ->

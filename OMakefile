@@ -148,21 +148,26 @@ FILES[] =
 #    doca
 
 
-PROGRAM = doca
+CUSTOM = docatop
 OCAML_LIBS +=
 OCAML_CLIBS +=
 OCAML_OTHER_LIBS +=
 OCAML_LIB_FLAGS +=
 
-TOP = $(OCamlTop $(PROGRAM), $(FILES))
+private.TEST_FILES =
 
-all: $(TOP)
+TOP = $(OCamlTop $(CUSTOM), $(FILES))
+TEST_ANSI = $(OCamlProgram ansi_test, $(FILES) ansi_test)
+TEST_FILES += ansi_test
+
+all: $(TOP) $(TEST_ANSI)
 
 run: $(TOP)
 	$<
 
 clean:
 	rm -f \
-	$(filter-proper-targets $(glob $(addsuffix .*, $(FILES)))) \
-	$(PROGRAM) \
+	$(filter-proper-targets $(glob $(addsuffix .*, $(FILES) $(TEST_FILES)))) \
+	$(TOP) \
+	$(TEST_ANSI) \
 	*~
