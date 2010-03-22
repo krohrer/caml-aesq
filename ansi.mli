@@ -2,6 +2,8 @@
 
 (** ANSI Printing *)
 
+(** { 6 Low-level ANSI printing } *)
+
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
 type justification = [`left | `center | `right | `block ]
@@ -29,6 +31,7 @@ val set_inverted   : t -> bool -> unit
 val set_foreground : t -> color -> unit
 val set_background : t -> color -> unit
 
+(** { 6 High-level ANSI printing *)
 type 'a stream_t = 
   | SEmpty
   | SCons of 'a * 'a stream_t lazy_t 
@@ -44,10 +47,11 @@ type op = [
 
 module LineSeparation :
 sig
-  type instream = [ `break | `fragment of string | `ops of op list] stream_t
-  type outstream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type instream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type outstream = instream
 
   val separate_lines : width:int -> instream -> outstream
+    (** Insert linebreaks so that output is no more than [width] columns. *)
 end
 
 module Justification :
@@ -56,11 +60,13 @@ sig
   type outstream = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
   val justify : justification -> instream -> outstream
+    (** Justify linebroken text by converting breaks to spaces. *)
 end
 
 module Printer :
 sig
-  type instream = Justification.outstream
+  type instream = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
   val print : t -> instream -> unit
+    (** Print stream *)
 end

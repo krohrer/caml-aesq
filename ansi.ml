@@ -210,7 +210,7 @@ type op = [
 
 module LineSeparation =
 struct
-  type instream = [ `break | `fragment of string | `ops of op list] stream_t
+  type instream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
   type outstream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
 
   let separate_lines ~width stream =
@@ -237,6 +237,10 @@ struct
 		      (* Insert a break *)
 		      SCons (`break,
 			     lazy (line_splitter (rem_width-1) stream))
+		| `linebreak ->
+		    (* Passthrough linebreaks *)
+		    SCons (`linebreak,
+			   lazy (line_splitter width stream))
 		| `ops ops ->
 		    (* Passthrough for ops *)
 		    SCons (`ops ops,
