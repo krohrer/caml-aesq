@@ -273,47 +273,83 @@ end
 module Justification =
 struct
   type input = LineSeparation.output
-  type output = [ `fragment of string | `ops of op list | `linebreak ] stream_t
-
-  let not_break =
-    function
-      | `break -> false
-      | _ -> true
+  type output = [ `fragment of string | `ops of op list | `linebreak | `space of int] stream_t
 
   let justify just (width,stream) =
-    let rec collect_line accum =
+    let rec collect_line accum_rev =
       function
 	| SEmpty ->
 	    (* Justify what we have left *)
-	    transform_line accum stream
+	    justify (List.rev accum_rev) stream
 	| SCons (a, lstream) ->
 	    let stream = Lazy.force lstream in
 	      match a with
 		| `linebreak ->
 		    (* Justify accumulated line *)
-		    transform_line accum stream
-		| x ->
-		    (* Justify accumulated line *)
-		    collect_line (x::accum) stream
-    and transform_line accum stream =
-      let stats accum =
-	let rec fold break_count frag_size =
-	  function
-	    | [] ->
-		break_count, frag_size
-	    | `break::rest ->
-		fold (break_count + 1) frag_size rest
-	    | `fragment f::rest ->
-		fold break_count (frag_size + String.length f) rest
-	    | `linebreak ::_ ->
-		failwith "Ansi.Justification.collect_line"
-	    | `ops ops::rest ->
-		fold break_count frag_size rest
-	in
-	  fold 0 0 accum
+		    justify (List.rev accum_rev) stream
+		| (`break as x)
+		| (`fragment _ as x)
+		| (`ops _ as x) ->
+		    (* Collect elements for current line *)
+		    collect_line (x::accum_rev) stream
+    and justify_fix left_space right_space accum stream =
+      let rec make_stream = function
+	| [] ->
+	    SCons (`space right_space,
+		   lazy (collect_line [] stream))
+	| `break::rest ->
+	    SCons (`space 1,
+		   lazy (make_stream rest))
+	| (`fragment _ as x)::rest
+	| (`ops _ as x)::rest ->
+	    SCons (x, lazy (make_stream rest))
       in
-	ignore (stats accum);
-	SEmpty
+	SCons (`space left_space,
+	       lazy (make_stream accum))
+    and justify_left rem_space =
+      justify_fix 0 rem_space
+    and justify_center rem_space =
+      let hr = rem_space / 2 in
+	justify_fix hr (rem_space - hr)
+    and justify_right rem_space =
+      justify_fix rem_space 0
+    and justify_block breaks rem_space accum stream =
+      let rec make_stream a = function
+	| [] ->
+	    collect_line [] stream
+	| `break::rest ->
+	    SCons (`space (a / breaks),
+		   lazy (make_stream (a mod breaks + rem_space) rest))
+	| (`fragment _ as x)::rest
+	| (`ops _ as x)::rest ->
+	    SCons (x,
+		   lazy (make_stream a rest))
+      in
+	make_stream rem_space accum
+    and justify accum stream =
+      let breaks, rem_width = measure_line accum in
+	match just with
+	  | `left ->
+	      justify_left rem_width accum stream
+	  | `center ->
+	      justify_center rem_width accum stream
+	  | `right ->
+	      justify_right rem_width accum stream
+	  | `block ->
+	      justify_block breaks rem_width accum stream
+    and measure_line accum =
+      let rec fold break_count rem_width =
+	function
+	  | [] ->
+	      break_count, rem_width
+	  | `break::rest ->
+	      fold (break_count + 1) rem_width rest
+	  | `fragment f::rest ->
+	      fold break_count (rem_width + String.length f) rest
+	  | `ops ops::rest ->
+	      fold break_count rem_width rest
+      in
+	fold 0 width accum
     in
       collect_line [] stream
 end
@@ -322,7 +358,7 @@ end
 
 module Printer =
 struct
-  type input = [ `fragment of string | `ops of op list | `linebreak ] stream_t
+  type input = [ `fragment of string | `ops of op list | `space of int | `linebreak ] stream_t
   let rec print ansi =
     function
       | SEmpty -> ()
@@ -334,6 +370,9 @@ struct
 		  print ansi stream
 	      | `ops ops ->
 		  List.iter (print_ops ansi) ops;
+		  print ansi stream
+	      | `space n ->
+		  print_space ansi n;
 		  print ansi stream
 	      | `linebreak ->
 		  print_newline ansi ();

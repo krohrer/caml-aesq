@@ -57,7 +57,7 @@ end
 module Justification :
 sig
   type input = LineSeparation.output
-  type output = [ `fragment of string | `ops of op list | `linebreak ] stream_t
+  type output = [ `fragment of string | `space of int | `ops of op list | `linebreak ] stream_t
 
   val justify : justification -> input -> output
     (** Justify linebroken text by converting breaks to spaces. *)
@@ -65,7 +65,7 @@ end
 
 module Printer :
 sig
-  type input = [ `fragment of string | `ops of op list | `linebreak ] stream_t
+  type input = [ `fragment of string | `space of int | `ops of op list | `linebreak ] stream_t
 
   val print : t -> input -> unit
     (** Print stream *)
