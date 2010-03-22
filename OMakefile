@@ -89,6 +89,8 @@ USE_OCAMLFIND = true
 OCAMLPACKS[] =
 	extlib
 
+OCAMLFINDFLAGS +=
+
 if $(not $(OCAMLFIND_EXISTS))
     eprintln(This project requires ocamlfind, but is was not found.)
     eprintln(You need to install ocamlfind and run "omake --configure".)
@@ -143,7 +145,7 @@ OCAML_NATIVE_LINK_FLAGS +=
 
 FILES[] =
     ansi
-    doca
+#    doca
 
 
 PROGRAM = doca

@@ -1,5 +1,6 @@
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
+type justify = [`left | `center | `right | `block ]
 type underline = [`single | `none]
 
 type t = {
@@ -13,9 +14,8 @@ type t = {
   mutable p_active_underline : underline;
   mutable p_active_inverted : bool;
   mutable p_active_foreground : color;
-mutable p_active_background : color
+  mutable p_active_background : color
 }
-
 
 let make outc = {
   p_outc = outc;
@@ -169,3 +169,90 @@ let printf p fmt =
 let flush p () =
   enforce_attributes p ();
   Pervasives.flush p.p_outc
+
+(*----------------------------------------------------------------------------*)
+
+module Text :
+sig
+  type 'a stream_t = 
+    | SEmpty
+    | SCons of 'a * 'a stream_t lazy_t 
+
+  type op = [ 
+  | `set_intensity of intensity
+  | `set_underline of underline
+  | `set_inverted of bool
+  | `set_foreground of color
+  | `set_background of color
+  ]
+
+  val make_lines : width:int -> justify:justify ->
+    [ `fragment of string | `break | op ] stream_t ->
+    [ `fragment of string | `linebreak | op ] stream_t
+  (* val consume_line : width:int -> textel Stream.t -> textel Queue.t *)
+  (* val make_line_stream : width:int -> textel Stream.t -> textel Queue.t Stream.t *)
+end =
+struct
+  type 'a stream_t = 
+    | SEmpty
+    | SCons of 'a * 'a stream_t lazy_t 
+
+  let empty = SEmpty
+  let cons hd ltl = SCons (hd, ltl)
+
+  type op = [ 
+  | `set_intensity of intensity
+  | `set_underline of underline
+  | `set_inverted of bool
+  | `set_foreground of color
+  | `set_background of color
+  ]
+
+  let hyphen = "-"
+  let separator = "\\"
+
+  let make_lines ~width ~justify stream =
+    let rec line_splitter rem_width broken =
+      function
+	| SEmpty -> empty
+	| SCons (c, lstream) ->
+	    match c with
+	      | `fragment s ->
+		  empty
+	      | `break ->
+		  empty
+	      | op ->
+		  cons op (lazy (line_splitter rem_width broken (Lazy.force lstream)))
+    in
+      empty
+
+  (*   let flen = String.length *)
+
+  (*   let flen = String.length frag in *)
+  (*     if flen > remwidth then *)
+  (* 	if flen > width then begin *)
+  (* 	  Queue.add (Fragment (String.sub 0 (width-1))) q; *)
+  (* 	  Queue.add (Fragment separator) *)
+
+  (*     match Stream.peek with *)
+  (* 	| None -> q *)
+  (* 	| Some el -> *)
+  (* 	    begin match el with *)
+  (* 	      | Fragment t -> *)
+  (* 		  let tlen = String.length t in *)
+  (* 		    if tlen > rem then *)
+  (* 		      if tlen > width then *)
+  (* 			ExtString.slice  *)
+  (* 	      | Break *)
+  (* 	      | Set_intensity i *)
+  (* 	      | Set_underline u *)
+  (* 	      | Set_inverted i *)
+  (* 	      | Set_foreground f *)
+  (* 	      | Set_background b *)
+  (* 	    end *)
+  (*   in *)
+  (*     iter width *)
+
+  (* let make_line_stream ~width stream = *)
+  (*   Stream.sempty *)
+end

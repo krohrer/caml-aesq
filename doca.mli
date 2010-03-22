@@ -40,4 +40,4 @@ val localize : 'l lang -> ('l lang * 'a) list -> 'a
 
 (** Printing *)
 
-val ansi_print : ?offset:int -> ?width:int -> out_channel -> document -> unit
+(* val ansi_print : ?offset:int -> ?width:int -> out_channel -> document -> unit *)

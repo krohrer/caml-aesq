@@ -4,6 +4,7 @@
 
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
+type justify = [`left | `center | `right | `block ]
 type underline = [`single | `none]
 
 type t
