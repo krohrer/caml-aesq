@@ -195,10 +195,6 @@ let flush p () =
 
 open ExtLib
 
-type 'a stream_t = 
-  | SEmpty
-  | SCons of 'a * 'a stream_t lazy_t 
-
 type op = [ 
 | `set_intensity of intensity
 | `set_underline of underline
@@ -212,60 +208,68 @@ type op = [
 
 module LineSeparation =
 struct
-  type input = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type input = [ `linebreak | `break | `fragment of string | `ops of op list] Stream.t
   type output = int * input
 
   let separate_lines ~width stream =
-    let rec line_splitter rem_width =
-      function
-	| SEmpty ->
-	    (* Done *)
-	    SEmpty
-	| SCons (c, lstream) ->
-	    let stream = Lazy.force lstream in
-	      match c with
-		| `fragment f ->
-		    (* Handle fragments separately *)
-		    split_fragment f rem_width stream
-		| `break ->
-		    if rem_width <= 2 then
-		      (* Break the line if not enough space left *)
-		      SCons (`linebreak,
-			     lazy (line_splitter width stream))
-		    else if rem_width = width then
-		      (* Ignore break at beginning of line *)
-		      line_splitter width stream
-		    else
-		      (* Insert a break *)
-		      SCons (`break,
-			     lazy (line_splitter (rem_width-1) stream))
-		| `linebreak ->
-		    (* Passthrough linebreaks *)
-		    SCons (`linebreak,
-			   lazy (line_splitter width stream))
-		| `ops ops ->
-		    (* Passthrough for ops *)
-		    SCons (`ops ops,
-			   lazy (line_splitter rem_width stream))
-    and split_fragment frag rem_width stream =
+    let rec splitter rem_width () =
+      try match Stream.next stream with
+	| `fragment f ->
+	    (* Handle fragments separately *)
+	    split_fragment f rem_width ()
+	| `break ->
+	    accumulate_breaks rem_width ()
+	| (`linebreak as x) ->
+	    Stream.icons x (Stream.slazy (splitter width))
+	| (`ops _ as x) ->
+	    Stream.icons x (Stream.slazy (splitter rem_width))
+	      (* Passthrough linebreaks and ops *)
+      with
+	  Stream.Failure -> Stream.sempty
+    and accumulate_breaks rem_width () =
+      try match Stream.next stream with
+	| `fragment f ->
+	    if rem_width <= 2 then
+	      (* Break the line if not enough space left *)
+	      Stream.icons `linebreak (Stream.slazy (split_fragment f width))
+	    else if rem_width = width then
+	      (* Ignore break at beginning of line *)
+	      split_fragment f rem_width ()
+	    else
+	      (* Insert a break *)
+	      Stream.icons `break (Stream.slazy (split_fragment f (rem_width-1)))
+	| `break ->
+	    (* Just another break in the wall (stream) *)
+	    accumulate_breaks rem_width ()
+	| (`linebreak as x) ->
+	    (* Ignore breaks and start new line*)
+	    Stream.icons x (Stream.slazy (splitter width))
+	| (`ops _ as x) ->
+	    (* Pass-through ops *)
+	    Stream.icons x (Stream.slazy (accumulate_breaks rem_width))
+      with
+	  Stream.Failure -> Stream.sempty
+    and split_fragment frag rem_width () =
       let flen = String.length frag in
 	if flen < rem_width then
 	  (* fragment still fits on this line *)
-	  SCons (`fragment frag,
-		 lazy (line_splitter (rem_width - flen) stream))
+	  Stream.icons (`fragment frag) (Stream.slazy (splitter (rem_width - flen)))
 	else if flen > width then
 	  (* fragment must be split anyway, may as well start on this line *)
 	  let left = String.slice ~last:rem_width frag in
 	  let right = String.slice ~first:rem_width frag in
-	    SCons (`fragment left,
-		   lazy (SCons (`linebreak,
-				lazy (split_fragment right width stream))))
+	    Stream.icons
+	      (`fragment left)
+	      (Stream.icons
+		 `linebreak
+		 (Stream.slazy (split_fragment right width)))
 	else
 	  (* fragment fits on next line for sure *)
-	  SCons (`linebreak,
-		 lazy (split_fragment frag width stream))
+	  Stream.icons
+	    `linebreak
+	    (Stream.slazy (split_fragment frag width))
     in
-      width, line_splitter width stream
+      width, splitter width ()
 end
 
 (*----------------------------------------------------------------------------*)
@@ -273,45 +277,42 @@ end
 module Justification =
 struct
   type input = LineSeparation.output
-  type output = [ `fragment of string | `ops of op list | `linebreak | `space of int] stream_t
+  type output = [ `fragment of string | `ops of op list | `linebreak | `space of int] Stream.t
 
   let justify just (width,stream) =
-    let rec collect_line accum_rev =
+    let rec collect_line accum_rev () =
       (* Collect non-linebreak elements for later justification *)
-      function
-	| SEmpty ->
-	    (* Justify what we have left *)
-	    justify_line (List.rev accum_rev) stream
-	| SCons (a, lstream) ->
-	    let stream = Lazy.force lstream in
-	      match a with
-		| `linebreak ->
-		    (* Justify accumulated line *)
-		    justify_line (List.rev accum_rev) stream
-		| (`break as x)
-		| (`fragment _ as x)
-		| (`ops _ as x) ->
-		    (* Collect elements for current line *)
-		    collect_line (x::accum_rev) stream
-    and justify_fix left_space right_space accum stream =
+      try match Stream.next stream with
+	| `linebreak ->
+	    (* Justify accumulated line *)
+	    justify_line (List.rev accum_rev)
+	| (`break as x)
+	| (`fragment _ as x)
+	| (`ops _ as x) ->
+	    (* Collect elements for current line *)
+	    collect_line (x::accum_rev) ()
+      with
+	  Stream.Failure -> justify_line (List.rev accum_rev)
+    and justify_fix left_space right_space accum =
       (* Justify with fixed space left and right *)
       let rec make_stream = function
 	| [] ->
 	    (* Space on the right *)
-	    SCons (`space right_space,
-		   lazy (collect_line [] stream))
+	    Stream.icons
+	      (`space right_space)
+	      (Stream.slazy (collect_line []))
 	| `break::rest ->
 	    (* Break is one space worth (fixed) *)
-	    SCons (`space 1,
-		   lazy (make_stream rest))
+	    Stream.icons (`space 1) (make_stream rest)
 	| (`fragment _ as x)::rest
 	| (`ops _ as x)::rest ->
 	    (* Passthrough for fragments and ops *)
-	    SCons (x, lazy (make_stream rest))
+	    Stream.icons x (make_stream rest)
       in
 	(* Space on the left *)
-	SCons (`space left_space,
-	       lazy (make_stream accum))
+	Stream.icons
+	  (`space left_space)
+	  (make_stream accum)
     and justify_left rem_space =
       justify_fix 0 rem_space
     and justify_center rem_space =
@@ -319,35 +320,35 @@ struct
 	justify_fix hr (rem_space - hr)
     and justify_right rem_space =
       justify_fix rem_space 0
-    and justify_block breaks rem_space accum stream =
+    and justify_block breaks rem_space accum =
       (* Justify space evenly for all breaks *)
       let rec make_stream a = function
 	| [] ->
-	    collect_line [] stream
+	    collect_line [] ()
 	| `break::rest ->
 	    (* Use integer arithmetic instead of float *)
-	    SCons (`space (a / breaks),
-		   lazy (make_stream (a mod breaks + rem_space) rest))
+	    Stream.icons
+	      (`space (a / breaks))
+	      (make_stream (a mod breaks + rem_space) rest)
 	| (`fragment _ as x)::rest
 	| (`ops _ as x)::rest ->
 	    (* Passthrough for fragments and ops *)
-	    SCons (x,
-		   lazy (make_stream a rest))
+	    Stream.icons x (make_stream a rest)
       in
 	make_stream rem_space accum
-    and justify_line accum stream =
+    and justify_line accum =
       (* Dispatch justification algorithm *)
       let break_count, frag_len = measure_line accum in
       let rem_width = max 0 (width - frag_len) in
 	match just with
 	  | `left ->
-	      justify_left rem_width accum stream
+	      justify_left rem_width accum
 	  | `center ->
-	      justify_center rem_width accum stream
+	      justify_center rem_width accum
 	  | `right ->
-	      justify_right rem_width accum stream
+	      justify_right rem_width accum
 	  | `block ->
-	      justify_block break_count rem_width accum stream
+	      justify_block break_count rem_width accum
     and measure_line accum =
       (* Count breaks and measure fragment length *)
       let rec fold break_count frag_len =
@@ -363,32 +364,30 @@ struct
       in
 	fold 0 0 accum
     in
-      collect_line [] stream
+      collect_line [] ()
 end
 
 (*----------------------------------------------------------------------------*)
 
 module Printer =
 struct
-  type input = [ `fragment of string | `ops of op list | `space of int | `linebreak ] stream_t
-  let rec print ansi =
-    function
-      | SEmpty -> ()
-      | SCons (a, lstream) ->
-	  let stream = Lazy.force lstream in
-	    match a with
-	      | `fragment f ->
-		  print_string ansi f;
-		  print ansi stream
-	      | `ops ops ->
-		  List.iter (print_ops ansi) ops;
-		  print ansi stream
-	      | `space n ->
-		  print_space ansi n;
-		  print ansi stream
-	      | `linebreak ->
-		  print_newline ansi ();
-		  print ansi stream
+  type input = [ `fragment of string | `ops of op list | `space of int | `linebreak ] Stream.t
+  let rec print ansi stream =
+    try match Stream.next stream with
+      | `fragment f ->
+	  print_string ansi f;
+	  print ansi stream
+      | `ops ops ->
+	  List.iter (print_ops ansi) ops;
+	  print ansi stream
+      | `space n ->
+	  print_space ansi n;
+	  print ansi stream
+      | `linebreak ->
+	  print_newline ansi ();
+	  print ansi stream
+    with
+	Stream.Failure -> ()
   and print_ops ansi =
     function
       | `set_intensity i ->

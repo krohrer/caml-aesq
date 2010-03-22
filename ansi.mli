@@ -32,10 +32,6 @@ val set_foreground : t -> color -> unit
 val set_background : t -> color -> unit
 
 (** { 6 High-level ANSI printing *)
-type 'a stream_t = 
-  | SEmpty
-  | SCons of 'a * 'a stream_t lazy_t 
-
 type op = [ 
 | `set_intensity of intensity
 | `set_underline of underline
@@ -47,7 +43,7 @@ type op = [
 
 module LineSeparation :
 sig
-  type input = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type input = [ `linebreak | `break | `fragment of string | `ops of op list] Stream.t
   type output = int * input
 
   val separate_lines : width:int -> input -> output
@@ -57,7 +53,7 @@ end
 module Justification :
 sig
   type input = LineSeparation.output
-  type output = [ `fragment of string | `space of int | `ops of op list | `linebreak ] stream_t
+  type output = [ `fragment of string | `space of int | `ops of op list | `linebreak ] Stream.t
 
   val justify : justification -> input -> output
     (** Justify linebroken text by converting breaks to spaces. *)
@@ -65,7 +61,7 @@ end
 
 module Printer :
 sig
-  type input = [ `fragment of string | `space of int | `ops of op list | `linebreak ] stream_t
+  type input = [ `fragment of string | `space of int | `ops of op list | `linebreak ] Stream.t
 
   val print : t -> input -> unit
     (** Print stream *)
