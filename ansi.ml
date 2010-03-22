@@ -275,15 +275,53 @@ struct
   type input = LineSeparation.output
   type output = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
+  let not_break =
+    function
+      | `break -> false
+      | _ -> true
+
   let justify just (width,stream) =
-    let rec justify_line q =
+    let rec collect_line linestart accum =
       function
 	| SEmpty ->
-	    SEmpty
-	| SCons (a, b) ->
-	    SEmpty
+	    (* Justify what we have left *)
+	    transform_line accum stream
+	| SCons (a, lstream) ->
+	    let stream = Lazy.force lstream in
+	      match a with
+		| `linebreak ->
+		    (* Justify accumulated line *)
+		    transform_line accum stream
+		| `break ->
+		    if linestart then
+		      collect_line linestart accum stream
+		    else
+		      collect_line linestart (`break::accum) stream
+		| `fragment f ->
+		    collect_line false (`fragment f::accum) stream
+		| `ops ops ->
+		    collect_line linestart (`ops ops::accum) stream
+    and transform_line accum stream =
+      let stats accum =
+	let rec fold break_count frag_size =
+	  function
+	    | [] ->
+		break_count, frag_size
+	    | `break::rest ->
+		fold (break_count + 1) frag_size rest
+	    | `fragment f::rest ->
+		fold break_count (frag_size + String.length f) rest
+	    | `linebreak ::_ ->
+		failwith "Ansi.Justification.collect_line"
+	    | `ops ops::rest ->
+		fold break_count frag_size rest
+	in
+	  fold 0 0 accum
+      in
+	ignore (stats accum);
+	SEmpty
     in
-      justify_line [] stream
+      collect_line true [] stream
 end
 
 (*----------------------------------------------------------------------------*)
