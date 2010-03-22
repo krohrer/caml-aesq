@@ -6,3 +6,4 @@ doca
 *.o
 *.cmi
 *.cmo
+.DS_Store
