@@ -208,10 +208,12 @@ type op = [
 | `set_context of context
 ]
 
+(*----------------------------------------------------------------------------*)
+
 module LineSeparation =
 struct
-  type instream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
-  type outstream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type input = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type output = int * input
 
   let separate_lines ~width stream =
     let rec line_splitter rem_width =
@@ -263,21 +265,32 @@ struct
 	  SCons (`linebreak,
 		 lazy (split_fragment frag width stream))
     in
-      line_splitter width stream
+      width, line_splitter width stream
 end
+
+(*----------------------------------------------------------------------------*)
 
 module Justification =
 struct
-  type instream = LineSeparation.outstream
-  type outstream = [ `fragment of string | `ops of op list | `linebreak ] stream_t
+  type input = LineSeparation.output
+  type output = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
-  let justify just stream =
-    SEmpty
+  let justify just (width,stream) =
+    let rec justify_line q =
+      function
+	| SEmpty ->
+	    SEmpty
+	| SCons (a, b) ->
+	    SEmpty
+    in
+      justify_line [] stream
 end
+
+(*----------------------------------------------------------------------------*)
 
 module Printer =
 struct
-  type instream = Justification.outstream
+  type input = [ `fragment of string | `ops of op list | `linebreak ] stream_t
   let rec print ansi =
     function
       | SEmpty -> ()

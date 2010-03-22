@@ -47,26 +47,26 @@ type op = [
 
 module LineSeparation :
 sig
-  type instream = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
-  type outstream = instream
+  type input = [ `linebreak | `break | `fragment of string | `ops of op list] stream_t
+  type output = int * input
 
-  val separate_lines : width:int -> instream -> outstream
+  val separate_lines : width:int -> input -> output
     (** Insert linebreaks so that output is no more than [width] columns. *)
 end
 
 module Justification :
 sig
-  type instream = LineSeparation.outstream
-  type outstream = [ `fragment of string | `ops of op list | `linebreak ] stream_t
+  type input = LineSeparation.output
+  type output = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
-  val justify : justification -> instream -> outstream
+  val justify : justification -> input -> output
     (** Justify linebroken text by converting breaks to spaces. *)
 end
 
 module Printer :
 sig
-  type instream = [ `fragment of string | `ops of op list | `linebreak ] stream_t
+  type input = [ `fragment of string | `ops of op list | `linebreak ] stream_t
 
-  val print : t -> instream -> unit
+  val print : t -> input -> unit
     (** Print stream *)
 end
