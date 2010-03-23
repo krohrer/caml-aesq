@@ -216,69 +216,69 @@ struct
   type input  = [ frag | breaks | ops ] Stream.t
   type output = [ frag | breaks | ops ] Stream.t
 
-  let separate ~width stream =
-    let rec splitter rem_width () =
-      match Stream.peek stream with
-	| None -> Stream.sempty
-	| Some c ->
-	    match c with
-	      | `fragment f ->
-		  (* Handle fragments separately *)
-		  split_fragment f rem_width ()
-	      | `break ->
-		  (* Normalize breaks *)
-		  accumulate_breaks rem_width ()
-	      | (`linebreak as x) ->
-		  (* Start a new line *)
-		  Stream.icons x (Stream.slazy (splitter width))
-	      | #ops as x ->
-		  (* Passthrough ops *)
-		  Stream.icons x (Stream.slazy (splitter rem_width))
-    and accumulate_breaks rem_width () =
-      match Stream.peek stream with
-	| None -> Stream.sempty
-	| Some c ->
-	    match c with
-	      | `fragment f ->
-		  if rem_width <= 2 then
-		    (* Break the line if not enough space left *)
-		    Stream.icons `linebreak (Stream.slazy (split_fragment f width))
-		  else if rem_width = width then
-		    (* Ignore break at beginning of line *)
-		    split_fragment f rem_width ()
-		  else
-		    (* Insert a break *)
-		    Stream.icons `break (Stream.slazy (split_fragment f (rem_width-1)))
-	      | `break ->
-		  (* Just another break in the wall (stream) *)
-		  accumulate_breaks rem_width ()
-	      | (`linebreak as x) ->
-		  (* Ignore breaks and start new line*)
-		  Stream.icons x (Stream.slazy (splitter width))
-	      | #ops as x ->
-		  (* Pass-through ops *)
-		  Stream.icons x (Stream.slazy (accumulate_breaks rem_width))
-    and split_fragment frag rem_width () =
-      let flen = String.length frag in
-	if flen < rem_width then
-	  (* fragment still fits on this line *)
-	  Stream.icons (`fragment frag) (Stream.slazy (splitter (rem_width - flen)))
-	else if flen > width then
-	  (* fragment must be split anyway, may as well start on this line *)
-	  let left = String.slice ~last:rem_width frag in
-	  let right = String.slice ~first:rem_width frag in
-	    Stream.icons
-	      (`fragment left)
-	      (Stream.icons
-		 `linebreak
-		 (Stream.slazy (split_fragment right width)))
-	else
-	  (* fragment fits on next line for sure *)
+  let rec splitter width ~rem_width stream () =
+    match Stream.peek stream with
+      | None -> Stream.sempty
+      | Some c ->
+	  match c with
+	    | `fragment f ->
+		(* Handle fragments separately *)
+		split_fragment width ~rem_width f stream ()
+	    | `break ->
+		(* Normalize breaks *)
+		accumulate_breaks width ~rem_width stream ()
+	    | (`linebreak as x) ->
+		(* Start a new line *)
+		Stream.icons x (Stream.slazy (splitter width ~rem_width:width stream))
+	    | #ops as x ->
+		(* Passthrough ops *)
+		Stream.icons x (Stream.slazy (splitter width ~rem_width stream))
+  and accumulate_breaks width ~rem_width stream () =
+    match Stream.peek stream with
+      | None -> Stream.sempty
+      | Some c ->
+	  match c with
+	    | `fragment f ->
+		if rem_width <= 2 then
+		  (* Break the line if not enough space left *)
+		  Stream.icons `linebreak (Stream.slazy (split_fragment width ~rem_width:width f stream))
+		else if rem_width = width then
+		  (* Ignore break at beginning of line *)
+		  split_fragment width ~rem_width f stream ()
+		else
+		  (* Insert a break *)
+		  Stream.icons `break (Stream.slazy (split_fragment width ~rem_width:(rem_width-1) f stream))
+	    | `break ->
+		(* Just another break in the wall (stream) *)
+		accumulate_breaks width ~rem_width stream ()
+	    | (`linebreak as x) ->
+		(* Ignore breaks and start new line*)
+		Stream.icons x (Stream.slazy (splitter width ~rem_width:width stream))
+	    | #ops as x ->
+		(* Pass-through ops *)
+		Stream.icons x (Stream.slazy (accumulate_breaks width ~rem_width stream))
+  and split_fragment width ~rem_width frag stream () =
+    let flen = String.length frag in
+      if flen < rem_width then
+	(* fragment still fits on this line *)
+	Stream.icons (`fragment frag) (Stream.slazy (splitter width ~rem_width:(rem_width - flen) stream))
+      else if flen > width then
+	(* fragment must be split anyway, may as well start on this line *)
+	let left = String.slice ~last:rem_width frag in
+	let right = String.slice ~first:rem_width frag in
 	  Stream.icons
-	    `linebreak
-	    (Stream.slazy (split_fragment frag width))
-    in
-      Stream.slazy (splitter width)
+	    (`fragment left)
+	    (Stream.icons
+	       `linebreak
+	       (Stream.slazy (split_fragment width ~rem_width:width right stream)))
+      else
+	(* fragment fits on next line for sure *)
+	Stream.icons
+	  `linebreak
+	  (Stream.slazy (split_fragment width ~rem_width:width frag stream))
+
+  let separate ~width stream =
+    Stream.slazy (splitter ~rem_width:width width stream)
 end
 
 (*----------------------------------------------------------------------------*)

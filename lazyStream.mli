@@ -14,8 +14,5 @@ val is_empty : 'a t -> bool
 
 val cons : 'a -> 'a t -> 'a t
 
-val slazy : (unit -> 'a cell) -> 'a t
-val force : 'a t -> 'a cell
-
 val hd : 'a t -> 'a
 val tl : 'a t -> 'a t

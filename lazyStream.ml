@@ -13,9 +13,6 @@ let is_empty lc = Lazy.force lc = Nil
 let cons x s =
   Lazy.lazy_from_val (Cons (x, s))
 
-let slazy f =
-  Lazy.lazy_from_fun f
-
 let force s =
   Lazy.force s
 

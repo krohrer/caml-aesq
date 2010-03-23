@@ -145,6 +145,7 @@ OCAML_NATIVE_LINK_FLAGS +=
 
 FILES[] =
     ansi
+    lazyStream
 #    doca
 
 
