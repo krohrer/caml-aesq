@@ -32,7 +32,7 @@ val set_foreground : t -> color -> unit
 val set_background : t -> color -> unit
 
 (** { 6 High-level ANSI printing *)
-type op = [ 
+type ops = [ 
 | `set_intensity of intensity
 | `set_underline of underline
 | `set_inverted of bool
@@ -41,27 +41,39 @@ type op = [
 | `set_context of context
 ]
 
+type frag = [ `fragment of string ]
+type breaks = [ `break | `linebreak ]
+type whitespaces = [ `space of int | `newline ]
+
 module LineSeparation :
 sig
-  type input = [ `linebreak | `break | `fragment of string | `ops of op list] Stream.t
-  type output = int * input
+  type input  = [ frag | breaks | ops ] Stream.t
+  type output = [ frag | breaks | ops ] Stream.t
 
-  val separate_lines : width:int -> input -> output
+  val separate : width:int -> input -> output
     (** Insert linebreaks so that output is no more than [width] columns. *)
 end
 
 module Justification :
 sig
-  type input = LineSeparation.output
-  type output = [ `fragment of string | `space of int | `ops of op list | `linebreak ] Stream.t
+  type input  = [ frag | breaks | ops ] Stream.t
+  type output = [ frag | whitespaces | ops ] Stream.t
 
-  val justify : justification -> input -> output
+  val justify : width:int -> justification -> input -> output
     (** Justify linebroken text by converting breaks to spaces. *)
+end
+
+module Tabs :
+sig
+  type input  = [ frag | whitespaces | ops ] Stream.t
+  type output = [ frag | whitespaces | ops ] Stream.t
+
+  val make : input list -> output
 end
 
 module Printer :
 sig
-  type input = [ `fragment of string | `space of int | `ops of op list | `linebreak ] Stream.t
+  type input = [ frag | whitespaces | ops ] Stream.t
 
   val print : t -> input -> unit
     (** Print stream *)

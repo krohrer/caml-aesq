@@ -196,7 +196,7 @@ let flush p () =
 
 open ExtLib
 
-type op = [ 
+type ops = [ 
 | `set_intensity of intensity
 | `set_underline of underline
 | `set_inverted of bool
@@ -205,26 +205,32 @@ type op = [
 | `set_context of context
 ]
 
+type frag = [ `fragment of string ]
+type breaks = [ `break | `linebreak ]
+type whitespaces = [ `space of int | `newline ]
+
 (*----------------------------------------------------------------------------*)
 
 module LineSeparation =
 struct
-  type input = [ `linebreak | `break | `fragment of string | `ops of op list] Stream.t
-  type output = int * input
+  type input  = [ frag | breaks | ops ] Stream.t
+  type output = [ frag | breaks | ops ] Stream.t
 
-  let separate_lines ~width stream =
+  let separate ~width stream =
     let rec splitter rem_width () =
       try match Stream.next stream with
 	| `fragment f ->
 	    (* Handle fragments separately *)
 	    split_fragment f rem_width ()
 	| `break ->
+	    (* Normalize breaks *)
 	    accumulate_breaks rem_width ()
 	| (`linebreak as x) ->
+	    (* Start a new line *)
 	    Stream.icons x (Stream.slazy (splitter width))
-	| (`ops _ as x) ->
+	| #ops as x ->
+	    (* Passthrough ops *)
 	    Stream.icons x (Stream.slazy (splitter rem_width))
-	      (* Passthrough linebreaks and ops *)
       with
 	  Stream.Failure -> Stream.sempty
     and accumulate_breaks rem_width () =
@@ -245,7 +251,7 @@ struct
 	| (`linebreak as x) ->
 	    (* Ignore breaks and start new line*)
 	    Stream.icons x (Stream.slazy (splitter width))
-	| (`ops _ as x) ->
+	| #ops as x ->
 	    (* Pass-through ops *)
 	    Stream.icons x (Stream.slazy (accumulate_breaks rem_width))
       with
@@ -270,17 +276,17 @@ struct
 	    `linebreak
 	    (Stream.slazy (split_fragment frag width))
     in
-      width, splitter width ()
+      splitter width ()
 end
 
 (*----------------------------------------------------------------------------*)
 
 module Justification =
 struct
-  type input = LineSeparation.output
-  type output = [ `fragment of string | `ops of op list | `linebreak | `space of int] Stream.t
+  type input  = [ frag | breaks | ops ] Stream.t
+  type output = [ frag | whitespaces | ops ] Stream.t
 
-  let justify just (width,stream) =
+  let justify ~width just stream =
     let rec collect_line accum_rev () =
       (* Collect non-linebreak elements for later justification *)
       try match Stream.next stream with
@@ -289,7 +295,7 @@ struct
 	    justify_line (List.rev accum_rev)
 	| (`break as x)
 	| (`fragment _ as x)
-	| (`ops _ as x) ->
+	| (#ops as x) ->
 	    (* Collect elements for current line *)
 	    collect_line (x::accum_rev) ()
       with
@@ -306,7 +312,7 @@ struct
 	    (* Break is one space worth (fixed) *)
 	    Stream.icons (`space 1) (make_stream rest)
 	| (`fragment _ as x)::rest
-	| (`ops _ as x)::rest ->
+	| (#ops as x)::rest ->
 	    (* Passthrough for fragments and ops *)
 	    Stream.icons x (make_stream rest)
       in
@@ -332,7 +338,7 @@ struct
 	      (`space (a / breaks))
 	      (make_stream (a mod breaks + rem_space) rest)
 	| (`fragment _ as x)::rest
-	| (`ops _ as x)::rest ->
+	| (#ops as x)::rest ->
 	    (* Passthrough for fragments and ops *)
 	    Stream.icons x (make_stream a rest)
       in
@@ -360,7 +366,7 @@ struct
 	      fold (break_count + 1) frag_len rest
 	  | `fragment f::rest ->
 	      fold break_count (frag_len + String.length f) rest
-	  | `ops ops::rest ->
+	  | #ops::rest ->
 	      fold break_count frag_len rest
       in
 	fold 0 0 accum
@@ -370,9 +376,21 @@ end
 
 (*----------------------------------------------------------------------------*)
 
+module Tabs =
+struct
+  type input  = [ frag | whitespaces | ops ] Stream.t
+  type output = [ frag | whitespaces | ops ] Stream.t
+
+  let make streams =
+    Stream.sempty
+end
+
+(*----------------------------------------------------------------------------*)
+
 module Printer =
 struct
-  type input = [ `fragment of string | `ops of op list | `space of int | `linebreak ] Stream.t
+  type input = [ frag | whitespaces | ops ] Stream.t
+
   let rec print ansi stream =
     prerr_string "= BEFORE =====================================================\n";
     Gc.print_stat stderr;
@@ -381,11 +399,11 @@ struct
 	match Stream.next stream with
 	  | `fragment f ->
 	      print_string ansi f
-	  | `ops ops ->
-	      List.iter (print_ops ansi) ops
+	  | #ops as o ->
+	      print_ops ansi o
 	  | `space n ->
 	      print_space ansi n
-	  | `linebreak ->
+	  | `newline ->
 	      print_newline ansi ()
       done with
 	  Stream.Failure -> flush ansi ()
