@@ -47,8 +47,8 @@ type whitespaces = [ `space of int | `newline ]
 
 module LineSeparation :
 sig
-  type input  = [ frag | breaks | ops ] Stream.t
-  type output = [ frag | breaks | ops ] Stream.t
+  type input  = [ frag | breaks | ops ] LazyStream.t
+  type output = [ frag | breaks | ops ] LazyStream.t
 
   val separate : width:int -> input -> output
     (** Insert linebreaks so that output is no more than [width] columns. *)

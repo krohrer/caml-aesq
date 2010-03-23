@@ -213,72 +213,75 @@ type whitespaces = [ `space of int | `newline ]
 
 module LineSeparation =
 struct
-  type input  = [ frag | breaks | ops ] Stream.t
-  type output = [ frag | breaks | ops ] Stream.t
+  type input  = [ frag | breaks | ops ] LazyStream.t
+  type output = [ frag | breaks | ops ] LazyStream.t
 
-  let rec splitter width ~rem_width stream () =
-    match Stream.peek stream with
-      | None -> Stream.sempty
-      | Some c ->
-	  match c with
-	    | `fragment f ->
-		(* Handle fragments separately *)
-		split_fragment width ~rem_width f stream ()
-	    | `break ->
-		(* Normalize breaks *)
-		accumulate_breaks width ~rem_width stream ()
-	    | (`linebreak as x) ->
-		(* Start a new line *)
-		Stream.icons x (Stream.slazy (splitter width ~rem_width:width stream))
-	    | #ops as x ->
-		(* Passthrough ops *)
-		Stream.icons x (Stream.slazy (splitter width ~rem_width stream))
-  and accumulate_breaks width ~rem_width stream () =
-    match Stream.peek stream with
-      | None -> Stream.sempty
-      | Some c ->
-	  match c with
-	    | `fragment f ->
-		if rem_width <= 2 then
-		  (* Break the line if not enough space left *)
-		  Stream.icons `linebreak (Stream.slazy (split_fragment width ~rem_width:width f stream))
-		else if rem_width = width then
-		  (* Ignore break at beginning of line *)
-		  split_fragment width ~rem_width f stream ()
-		else
-		  (* Insert a break *)
-		  Stream.icons `break (Stream.slazy (split_fragment width ~rem_width:(rem_width-1) f stream))
-	    | `break ->
-		(* Just another break in the wall (stream) *)
-		accumulate_breaks width ~rem_width stream ()
-	    | (`linebreak as x) ->
-		(* Ignore breaks and start new line*)
-		Stream.icons x (Stream.slazy (splitter width ~rem_width:width stream))
-	    | #ops as x ->
-		(* Pass-through ops *)
-		Stream.icons x (Stream.slazy (accumulate_breaks width ~rem_width stream))
-  and split_fragment width ~rem_width frag stream () =
+  module Ls = LazyStream
+
+  let rec splitter width ~rem_width =
+    function
+      | Ls.Nil ->
+	  Ls.Nil
+      | Ls.Cons (c, s) ->
+	  let stream = Lazy.force s in
+	    match c with
+	      | `fragment f ->
+		  (* Handle fragments separately *)
+		  split_fragment width ~rem_width f stream
+	      | `break ->
+		  (* Normalize breaks *)
+		  accumulate_breaks width ~rem_width stream
+	      | (`linebreak as x) ->
+		  (* Start a new line *)
+		  Ls.Cons (x, lazy (splitter width ~rem_width:width stream))
+	      | #ops as x ->
+		  (* Passthrough ops *)
+		  Ls.Cons (x, lazy (splitter width ~rem_width stream))
+  and accumulate_breaks width ~rem_width =
+    function
+      | Ls.Nil ->
+	  Ls.Nil
+      | Ls.Cons (c, s) ->
+	  let stream = Lazy.force s in
+	    match c with
+	      | `fragment f ->
+		  if rem_width <= 2 then
+		    (* Break the line if not enough space left *)
+		    Ls.Cons (`linebreak, lazy (split_fragment width ~rem_width:width f stream))
+		  else if rem_width = width then
+		    (* Ignore break at beginning of line *)
+		    split_fragment width ~rem_width f stream
+		  else
+		    (* Insert a break *)
+		    Ls.Cons (`break, lazy (split_fragment width ~rem_width:(rem_width-1) f stream))
+	      | `break ->
+		  (* Just another break in the wall (stream) *)
+		  accumulate_breaks width ~rem_width stream
+	      | (`linebreak as x) ->
+		  (* Ignore breaks and start new line*)
+		  Ls.Cons (x, lazy (splitter width ~rem_width:width stream))
+	      | #ops as x ->
+		  (* Pass-through ops *)
+		  Ls.Cons (x, lazy (accumulate_breaks width ~rem_width stream))
+  and split_fragment width ~rem_width frag stream =
     let flen = String.length frag in
       if flen < rem_width then
 	(* fragment still fits on this line *)
-	Stream.icons (`fragment frag) (Stream.slazy (splitter width ~rem_width:(rem_width - flen) stream))
+	Ls.Cons (`fragment frag, lazy (splitter width ~rem_width:(rem_width - flen) stream))
       else if flen > width then
 	(* fragment must be split anyway, may as well start on this line *)
 	let left = String.slice ~last:rem_width frag in
 	let right = String.slice ~first:rem_width frag in
-	  Stream.icons
-	    (`fragment left)
-	    (Stream.icons
-	       `linebreak
-	       (Stream.slazy (split_fragment width ~rem_width:width right stream)))
+	  Ls.Cons (`fragment left,
+		   Lazy.lazy_from_val (Ls.Cons (`linebreak,
+						lazy (split_fragment width ~rem_width:width right stream))))
       else
 	(* fragment fits on next line for sure *)
-	Stream.icons
-	  `linebreak
-	  (Stream.slazy (split_fragment width ~rem_width:width frag stream))
+	Ls.Cons (`linebreak,
+		 lazy (split_fragment width ~rem_width:width frag stream))
 
   let separate ~width stream =
-    Stream.slazy (splitter ~rem_width:width width stream)
+    splitter ~rem_width:width width stream
 end
 
 (*----------------------------------------------------------------------------*)

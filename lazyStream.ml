@@ -2,26 +2,28 @@
 
 exception Empty
 
-type 'a cell =
-    Nil
-  | Cons of 'a * 'a t
-and 'a t = 'a cell Lazy.t
+type 'a t =
+  | Nil
+  | Cons of 'a * 'a t Lazy.t
 
-let empty = Lazy.lazy_from_val Nil
-let is_empty lc = Lazy.force lc = Nil
+let empty = Nil
+let is_empty s = s = Nil
 
-let cons x s =
-  Lazy.lazy_from_val (Cons (x, s))
+let cons x l =
+  Cons (x, l)
 
-let force s =
-  Lazy.force s
+let cons2 x y l =
+  Cons (x, Lazy.lazy_from_val (Cons (y, l)))
 
-let hd s =
-  match force s with
+let lcons x f =
+  Cons (x, Lazy.lazy_from_fun f)
+
+let hd =
+  function
     | Nil -> raise Empty
     | Cons (h,_) -> h
 
-let tl s =
-  match force s with
+let tl =
+  function
     | Nil -> raise Empty
-    | Cons (_,t) -> t
+    | Cons (_,t) -> Lazy.force t
