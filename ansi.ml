@@ -331,7 +331,9 @@ struct
       (* Justify space evenly for all breaks *)
       let rec make_stream a = function
 	| [] ->
-	    collect_line [] ()
+	    Stream.icons
+	      `newline
+	      (Stream.slazy (collect_line []))
 	| `break::rest ->
 	    (* Use integer arithmetic instead of float *)
 	    Stream.icons
@@ -381,8 +383,24 @@ struct
   type input  = [ frag | whitespaces | ops ] Stream.t
   type output = [ frag | whitespaces | ops ] Stream.t
 
-  let make streams =
-    Stream.sempty
+  let stream_is_empty s = 
+    Stream.peek s = None
+
+  let streams_are_empty streams =
+    List.for_all stream_is_empty streams
+
+  let make ~widths streams =
+    let rec fold_tabs all_empty skip ws tabs () =
+      match tabs with
+	| [] ->
+	    if all_empty then
+	      Stream.sempty
+	    else
+	      Stream.sempty
+	| t::trest ->
+	    Stream.sempty
+    in
+      Stream.slazy (fold_tabs true 0 widths streams)
 end
 
 (*----------------------------------------------------------------------------*)
