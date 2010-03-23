@@ -33,6 +33,7 @@ val set_background : t -> color -> unit
 
 (** { 6 High-level ANSI printing *)
 type ops = [ 
+| `nop
 | `set_intensity of intensity
 | `set_underline of underline
 | `set_inverted of bool
@@ -56,8 +57,8 @@ end
 
 module Justification :
 sig
-  type input  = [ frag | breaks | ops ] Stream.t
-  type output = [ frag | whitespaces | ops ] Stream.t
+  type input  = [ frag | breaks | ops ] LazyStream.t
+  type output = [ frag | whitespaces | ops ] LazyStream.t
 
   val justify : width:int -> justification -> input -> output
     (** Justify linebroken text by converting breaks to spaces. *)

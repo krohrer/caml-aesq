@@ -197,6 +197,7 @@ let flush p () =
 open ExtLib
 
 type ops = [ 
+| `nop
 | `set_intensity of intensity
 | `set_underline of underline
 | `set_inverted of bool
@@ -273,12 +274,11 @@ struct
 	let left = String.slice ~last:rem_width frag in
 	let right = String.slice ~first:rem_width frag in
 	  Ls.Cons (`fragment left,
-		   Lazy.lazy_from_val (Ls.Cons (`linebreak,
-						lazy (split_fragment width ~rem_width:width right stream))))
+		   lazy (Ls.Cons (`linebreak,
+				  lazy (split_fragment width ~rem_width:width right stream))))
       else
 	(* fragment fits on next line for sure *)
-	Ls.Cons (`linebreak,
-		 lazy (split_fragment width ~rem_width:width frag stream))
+	Ls.Cons (`linebreak, lazy (split_fragment width ~rem_width:width frag stream))
 
   let separate ~width stream =
     splitter ~rem_width:width width stream
@@ -288,42 +288,43 @@ end
 
 module Justification =
 struct
-  type input  = [ frag | breaks | ops ] Stream.t
-  type output = [ frag | whitespaces | ops ] Stream.t
+  type input  = [ frag | breaks | ops ] LazyStream.t
+  type output = [ frag | whitespaces | ops ] LazyStream.t
 
-  let rec collect_line accum_rev width just stream () =
+  module Ls = LazyStream
+
+  let rec collect_line accum_rev width just =
     (* Collect non-linebreak elements for later justification *)
-    match Stream.peek stream with
-      | None ->
-	  justify_line width just (List.rev accum_rev) (Stream.slazy (collect_line [] width just stream))
-      | Some c ->
-	  match c with
-	    | `linebreak ->
-		(* Justify accumulated line *)
-		justify_line width just (List.rev accum_rev) (Stream.slazy (collect_line [] width just stream))
-	    | (`break as x)
-	    | (`fragment _ as x)
-	    | (#ops as x) ->
-		(* Collect elements for current line *)
-		collect_line (x::accum_rev) width just stream ()
+    function
+      | Ls.Nil ->
+	  justify_line width just (List.rev accum_rev) (lazy Ls.Nil)
+      | Ls.Cons (c, s) ->
+	  let stream = Lazy.force s in
+	    match c with
+	      | `linebreak ->
+		  (* Justify accumulated line *)
+		  justify_line width just (List.rev accum_rev) (lazy (collect_line [] width just stream))
+	      | (`break as x)
+	      | (`fragment _ as x)
+	      | (#ops as x) ->
+		  (* Collect elements for current line *)
+		  collect_line (x::accum_rev) width just stream
   and justify_fix left_space right_space accum sapp =
     (* Justify with fixed space left and right *)
     let rec make_stream = function
       | [] ->
 	  (* Space on the right *)
-	  Stream.icons (`space right_space) sapp
+	  Ls.Cons (`space right_space, sapp)
       | `break::rest ->
 	  (* Break is one space worth (fixed) *)
-	  Stream.icons (`space 1) (make_stream rest)
+	  Ls.Cons (`space 1, lazy (make_stream rest))
       | (`fragment _ as x)::rest
       | (#ops as x)::rest ->
 	  (* Passthrough for fragments and ops *)
-	  Stream.icons x (make_stream rest)
+	  Ls.Cons (x, lazy (make_stream rest))
     in
       (* Space on the left *)
-      Stream.icons
-	(`space left_space)
-	(make_stream accum)
+      Ls.Cons (`space left_space, lazy (make_stream accum))
   and justify_left rem_space =
     justify_fix 0 rem_space
   and justify_center rem_space =
@@ -335,16 +336,15 @@ struct
     (* Justify space evenly for all breaks *)
     let rec make_stream a = function
       | [] ->
-	  Stream.icons `newline sapp
+	  Ls.Cons (`newline, sapp)
       | `break::rest ->
 	  (* Use integer arithmetic instead of float *)
-	  Stream.icons
-	    (`space (a / breaks))
-	    (make_stream (a mod breaks + rem_space) rest)
+	    Ls.Cons (`space (a / breaks),
+		     lazy (make_stream (a mod breaks + rem_space) rest))
       | (`fragment _ as x)::rest
       | (#ops as x)::rest ->
 	  (* Passthrough for fragments and ops *)
-	  Stream.icons x (make_stream a rest)
+	  Ls.Cons (x, lazy (make_stream a rest))
     in
       make_stream rem_space accum
   and justify_line width just accum sapp =
@@ -376,7 +376,7 @@ struct
       fold 0 0 accum
 
   let justify ~width just stream =
-      Stream.slazy (collect_line [] width just stream)
+    collect_line [] width just stream
 end
 
 (*----------------------------------------------------------------------------*)
@@ -437,6 +437,8 @@ struct
     Gc.print_stat stderr
   and print_ops ansi =
     function
+      | `nop ->
+	  ()
       | `set_intensity i ->
 	  set_intensity ansi i
       | `set_underline u ->
