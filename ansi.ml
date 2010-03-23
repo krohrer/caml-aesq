@@ -288,96 +288,92 @@ struct
   type input  = [ frag | breaks | ops ] Stream.t
   type output = [ frag | whitespaces | ops ] Stream.t
 
-  let justify ~width just stream =
-    let rec collect_line accum_rev () =
-      (* Collect non-linebreak elements for later justification *)
-      match Stream.peek stream with
-	| None ->
-	    justify_line (List.rev accum_rev)
-	| Some c ->
-	    match c with
-	      | `linebreak ->
-		  (* Justify accumulated line *)
-		  justify_line (List.rev accum_rev)
-	      | (`break as x)
-	      | (`fragment _ as x)
-	      | (#ops as x) ->
-		  (* Collect elements for current line *)
-		  collect_line (x::accum_rev) ()
-    and justify_fix left_space right_space accum =
-      (* Justify with fixed space left and right *)
-      let rec make_stream = function
-	| [] ->
-	    (* Space on the right *)
-	    Stream.icons
-	      (`space right_space)
-	      (Stream.slazy (collect_line []))
-	| `break::rest ->
-	    (* Break is one space worth (fixed) *)
-	    Stream.icons (`space 1) (make_stream rest)
-	| (`fragment _ as x)::rest
-	| (#ops as x)::rest ->
-	    (* Passthrough for fragments and ops *)
-	    Stream.icons x (make_stream rest)
-      in
-	(* Space on the left *)
-	Stream.icons
-	  (`space left_space)
-	  (make_stream accum)
-    and justify_left rem_space =
-      justify_fix 0 rem_space
-    and justify_center rem_space =
-      let hr = rem_space / 2 in
-	justify_fix hr (rem_space - hr)
-    and justify_right rem_space =
-      justify_fix rem_space 0
-    and justify_block breaks rem_space accum =
-      (* Justify space evenly for all breaks *)
-      let rec make_stream a = function
-	| [] ->
-	    Stream.icons
-	      `newline
-	      (Stream.slazy (collect_line []))
-	| `break::rest ->
-	    (* Use integer arithmetic instead of float *)
-	    Stream.icons
-	      (`space (a / breaks))
-	      (make_stream (a mod breaks + rem_space) rest)
-	| (`fragment _ as x)::rest
-	| (#ops as x)::rest ->
-	    (* Passthrough for fragments and ops *)
-	    Stream.icons x (make_stream a rest)
-      in
-	make_stream rem_space accum
-    and justify_line accum =
-      (* Dispatch justification algorithm *)
-      let break_count, frag_len = measure_line accum in
-      let rem_width = max 0 (width - frag_len) in
-	match just with
-	  | `left ->
-	      justify_left rem_width accum
-	  | `center ->
-	      justify_center rem_width accum
-	  | `right ->
-	      justify_right rem_width accum
-	  | `block ->
-	      justify_block break_count rem_width accum
-    and measure_line accum =
-      (* Count breaks and measure fragment length *)
-      let rec fold break_count frag_len =
-	function
-	  | [] ->
-	      break_count, frag_len
-	  | `break::rest ->
-	      fold (break_count + 1) frag_len rest
-	  | `fragment f::rest ->
-	      fold break_count (frag_len + String.length f) rest
-	  | #ops::rest ->
-	      fold break_count frag_len rest
-      in
-	fold 0 0 accum
+  let rec collect_line accum_rev width just stream () =
+    (* Collect non-linebreak elements for later justification *)
+    match Stream.peek stream with
+      | None ->
+	  justify_line width just (List.rev accum_rev) (Stream.slazy (collect_line [] width just stream))
+      | Some c ->
+	  match c with
+	    | `linebreak ->
+		(* Justify accumulated line *)
+		justify_line width just (List.rev accum_rev) (Stream.slazy (collect_line [] width just stream))
+	    | (`break as x)
+	    | (`fragment _ as x)
+	    | (#ops as x) ->
+		(* Collect elements for current line *)
+		collect_line (x::accum_rev) width just stream ()
+  and justify_fix left_space right_space accum sapp =
+    (* Justify with fixed space left and right *)
+    let rec make_stream = function
+      | [] ->
+	  (* Space on the right *)
+	  Stream.icons (`space right_space) sapp
+      | `break::rest ->
+	  (* Break is one space worth (fixed) *)
+	  Stream.icons (`space 1) (make_stream rest)
+      | (`fragment _ as x)::rest
+      | (#ops as x)::rest ->
+	  (* Passthrough for fragments and ops *)
+	  Stream.icons x (make_stream rest)
     in
-      Stream.slazy (collect_line [])
+      (* Space on the left *)
+      Stream.icons
+	(`space left_space)
+	(make_stream accum)
+  and justify_left rem_space =
+    justify_fix 0 rem_space
+  and justify_center rem_space =
+    let hr = rem_space / 2 in
+      justify_fix hr (rem_space - hr)
+  and justify_right rem_space =
+    justify_fix rem_space 0
+  and justify_block breaks rem_space accum sapp =
+    (* Justify space evenly for all breaks *)
+    let rec make_stream a = function
+      | [] ->
+	  Stream.icons `newline sapp
+      | `break::rest ->
+	  (* Use integer arithmetic instead of float *)
+	  Stream.icons
+	    (`space (a / breaks))
+	    (make_stream (a mod breaks + rem_space) rest)
+      | (`fragment _ as x)::rest
+      | (#ops as x)::rest ->
+	  (* Passthrough for fragments and ops *)
+	  Stream.icons x (make_stream a rest)
+    in
+      make_stream rem_space accum
+  and justify_line width just accum sapp =
+    (* Dispatch justification algorithm *)
+    let break_count, frag_len = measure_line accum in
+    let rem_width = max 0 (width - frag_len) in
+      match just with
+	| `left ->
+	    justify_left rem_width accum sapp
+	| `center ->
+	    justify_center rem_width accum sapp
+	| `right ->
+	    justify_right rem_width accum sapp
+	| `block ->
+	    justify_block break_count rem_width accum sapp
+  and measure_line accum =
+    (* Count breaks and measure fragment length *)
+    let rec fold break_count frag_len =
+      function
+	| [] ->
+	    break_count, frag_len
+	| `break::rest ->
+	    fold (break_count + 1) frag_len rest
+	| `fragment f::rest ->
+	    fold break_count (frag_len + String.length f) rest
+	| #ops::rest ->
+	    fold break_count frag_len rest
+    in
+      fold 0 0 accum
+
+  let justify ~width just stream =
+      Stream.slazy (collect_line [] width just stream)
 end
 
 (*----------------------------------------------------------------------------*)

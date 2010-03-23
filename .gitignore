@@ -6,4 +6,8 @@ doca
 *.o
 *.cmi
 *.cmo
+*.cmx
+*.custom
+*.opt
+*.run
 .DS_Store
