@@ -18,13 +18,19 @@ type t = {
   mutable p_active : context;
 }
 
-let make_context () = {
-  c_intensity = `normal;
-  c_underline = `none;
-  c_inverted = false;
-  c_foreground = `default;
-  c_background = `default;
-}
+let make_context 
+  ?(intensity=`normal)
+  ?(underline=`none)
+  ?(inverted=false)
+  ?(foreground=`default)
+  ?(background=`default)
+  () = {
+    c_intensity = intensity;
+    c_underline = underline;
+    c_inverted = inverted;
+    c_foreground = foreground;
+    c_background = background;
+  }
 
 let copy_context ctx = {
   c_intensity = ctx.c_intensity;

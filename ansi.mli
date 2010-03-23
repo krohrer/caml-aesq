@@ -12,7 +12,13 @@ type underline = [`single | `none]
 type context
 type t
 
-val make_context : unit -> context
+val make_context : 
+  ?intensity:intensity ->
+  ?underline:underline ->
+  ?inverted:bool ->
+  ?foreground:color ->
+  ?background:color ->
+  unit -> context
 val default_context : t -> context
 
 val make : out_channel -> t
