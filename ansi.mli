@@ -68,7 +68,7 @@ sig
   type input  = [ frag | whitespaces | ops ] Stream.t
   type output = [ frag | whitespaces | ops ] Stream.t
 
-  val make : widths:int list -> input list -> output
+  val make : (int * input) list -> output
 end
 
 module Printer :

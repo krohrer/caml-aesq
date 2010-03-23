@@ -278,7 +278,7 @@ struct
 	    `linebreak
 	    (Stream.slazy (split_fragment frag width))
     in
-      splitter width ()
+      Stream.slazy (splitter width)
 end
 
 (*----------------------------------------------------------------------------*)
@@ -377,7 +377,7 @@ struct
       in
 	fold 0 0 accum
     in
-      collect_line [] ()
+      Stream.slazy (collect_line [])
 end
 
 (*----------------------------------------------------------------------------*)
@@ -393,18 +393,20 @@ struct
   let streams_are_empty streams =
     List.for_all stream_is_empty streams
 
-  let make ~widths streams =
-    let rec fold_tabs all_empty skip ws tabs () =
-      match tabs with
+  let make widths_and_streams =
+    let rec fold_tabs all_empty skip wts () =
+      match wts with
 	| [] ->
 	    if all_empty then
 	      Stream.sempty
 	    else
-	      Stream.sempty
-	| t::trest ->
+	      Stream.icons
+		`newline
+		(Stream.slazy (fold_tabs true 0 widths_and_streams))
+	| (w,t)::rest ->
 	    Stream.sempty
     in
-      Stream.slazy (fold_tabs true 0 widths streams)
+      Stream.slazy (fold_tabs true 0 widths_and_streams)
 end
 
 (*----------------------------------------------------------------------------*)
