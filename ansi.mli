@@ -19,23 +19,30 @@ val make_context :
   ?foreground:color ->
   ?background:color ->
   unit -> context
-val default_context : t -> context
 
-val make : out_channel -> t
-val reset : t -> unit -> unit
+val intensity  : context -> intensity
+val underline  : context -> underline
+val inverted   : context -> bool
+val foreground : context -> color
+val background : context -> color
+
+val set_intensity  : intensity -> context -> context
+val set_underline  : underline -> context -> context
+val set_inverted   : bool -> context -> context
+val set_foreground : color -> context -> context
+val set_background : color -> context -> context
+
+val make : ?context:context -> out_channel -> t
 val flush : t -> unit -> unit
+
+val context : t -> context
+val set_context : t -> context -> unit
+val map_context : t -> (context -> context) -> unit
 
 val print_space : t -> int -> unit
 val print_string : t -> string -> unit
 val print_newline : t -> unit -> unit
 val printf : t -> ('a,unit,string,unit) format4 -> 'a
-
-val set_context : t -> context -> unit
-val set_intensity  : t -> intensity -> unit
-val set_underline  : t -> underline -> unit
-val set_inverted   : t -> bool -> unit
-val set_foreground : t -> color -> unit
-val set_background : t -> color -> unit
 
 (** {6 High-level ANSI printing } *)
 

@@ -4,18 +4,21 @@ type justification = [`left | `center | `right | `block ]
 type underline = [`single | `none]
 
 type context = {
-  mutable c_intensity : intensity;
-  mutable c_underline : underline;
-  mutable c_inverted : bool;
-  mutable c_foreground : color;
-  mutable c_background : color;
+  c_intensity : intensity;
+  c_underline : underline;
+  c_inverted : bool;
+  c_foreground : color;
+  c_background : color;
 }
 
 type t = {
+  mutable p_intensity : intensity;
+  mutable p_underline : underline;
+  mutable p_inverted : bool;
+  mutable p_foreground : color;
+  mutable p_background : color;
   p_outc : out_channel;
-  p_real : context;
-  p_default : context;
-  mutable p_active : context;
+  mutable p_context : context;
 }
 
 let make_context 
@@ -32,57 +35,47 @@ let make_context
     c_background = background;
   }
 
-let copy_context ctx = {
-  c_intensity = ctx.c_intensity;
-  c_underline = ctx.c_underline;
-  c_inverted = ctx.c_inverted;
-  c_foreground = ctx.c_foreground;
-  c_background = ctx.c_background
-}
-
-let default_context p =
-  p.p_default
-
-let make outc =
-  let defctx = make_context () in {
+let make ?context outc =
+  let context =
+    match context with
+      | None -> make_context ()
+      | Some c -> c
+  in
+    {
+      p_intensity = `normal;
+      p_underline = `none;
+      p_inverted = false;
+      p_foreground = `default;
+      p_background = `default;
       p_outc = outc;
-      p_real = make_context ();
-      p_default = defctx;
-      p_active = defctx;
+      p_context = context;
     }
 
-let reset p () =
-  let ctx = p.p_default in
-    ctx.c_intensity <- `normal;
-    ctx.c_underline <- `none;
-    ctx.c_inverted <- false;
-    ctx.c_foreground <- `default;
-    ctx.c_background <- `default;
-    p.p_active <- ctx
+let context p =
+  p.p_context
 
-let set_intensity p i =
-  p.p_active.c_intensity <- i
-  
-let set_underline p u = 
-  p.p_active.c_underline <- u
+let set_context p ctx =
+  p.p_context <- ctx
 
-let set_inverted p i =
-  p.p_active.c_inverted <- i
+let map_context p f =
+  p.p_context <- f p.p_context
 
-let set_foreground p c =
-  p.p_active.c_foreground <- c
+let intensity ctx = ctx.c_intensity
+let underline ctx = ctx.c_underline
+let inverted ctx  = ctx.c_inverted
+let foreground ctx = ctx.c_foreground
+let background ctx = ctx.c_background
 
-let set_background p c =
-  p.p_active.c_background <- c
-
-let set_context p ctx = 
-  p.p_active <- ctx
+let set_intensity i ctx  = { ctx with c_intensity = i }
+let set_underline u ctx  = { ctx with c_underline = u }
+let set_inverted i ctx   = { ctx with c_inverted = i }
+let set_foreground c ctx = { ctx with c_foreground = c }
+let set_background c ctx = { ctx with c_background = c }
 
 let enforce_intensity p codes =
-  let i = p.p_active.c_intensity in
-  let real = p.p_real in
-    if i <> real.c_intensity then begin
-      real.c_intensity <- i;
+  let i = p.p_context.c_intensity in
+    if i <> p.p_intensity then begin
+      p.p_intensity <- i;
       let c =
         match i with
           | `bold -> 1
@@ -94,10 +87,9 @@ let enforce_intensity p codes =
       codes
 
 let enforce_underline p codes =
-  let u = p.p_active.c_underline in
-  let real = p.p_real in
-    if u <> real.c_underline then begin
-      real.c_underline <- u;
+  let u = p.p_context.c_underline in
+    if u <> p.p_underline then begin
+      p.p_underline <- u;
       let c =
         match u with
           | `single -> 4 
@@ -108,10 +100,9 @@ let enforce_underline p codes =
       codes
 
 let enforce_inverted p codes =
-  let i = p.p_active.c_inverted in
-  let real = p.p_real in
-    if i <> real.c_inverted then begin
-      real.c_inverted <- i;
+  let i = p.p_context.c_inverted in
+    if i <> p.p_inverted then begin
+      p.p_inverted <- i;
       let c = 
         match i with
           | true -> 7
@@ -136,19 +127,17 @@ let color_code base c =
     code + base
 
 let enforce_foreground p codes =
-  let c = p.p_active.c_foreground in
-  let real = p.p_real in
-    if c <> real.c_foreground then begin
-      real.c_foreground <- c;
+  let c = p.p_context.c_foreground in
+    if c <> p.p_foreground then begin
+      p.p_foreground <- c;
       (color_code 30 c) :: codes
     end else
       codes
 
 let enforce_background p codes =
-  let c = p.p_active.c_background in
-  let real = p.p_real in
-    if c <> real.c_background then begin
-      real.c_background <- c;
+  let c = p.p_context.c_background in
+    if c <> p.p_background then begin
+      p.p_background <- c;
       (color_code 40 c) :: codes
     end else
       codes
@@ -519,15 +508,15 @@ struct
       | `nop ->
           ()
       | `set_intensity i ->
-          set_intensity ansi i
+	  map_context ansi (set_intensity i)
       | `set_underline u ->
-          set_underline ansi u
+	  map_context ansi (set_underline u)
       | `set_inverted i ->
-          set_inverted ansi i
+	  map_context ansi (set_inverted i)
       | `set_foreground c ->
-          set_foreground ansi c
+	  map_context ansi (set_foreground c)
       | `set_background c ->
-          set_foreground ansi c
+	  map_context ansi (set_background c)
       | `set_context ctx ->
           set_context ansi ctx
 end

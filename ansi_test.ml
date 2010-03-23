@@ -70,6 +70,6 @@ let _ =
     (* A.flush a (); *)
     (* fprintf stdout "\n================================================================================\n%!"; *)
     A.Printer.print a s'';
-    A.reset a ();
+    A.set_context a (A.make_context ());
     A.flush a ();
     ()
