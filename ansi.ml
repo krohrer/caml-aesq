@@ -218,44 +218,46 @@ struct
 
   let separate ~width stream =
     let rec splitter rem_width () =
-      try match Stream.next stream with
-	| `fragment f ->
-	    (* Handle fragments separately *)
-	    split_fragment f rem_width ()
-	| `break ->
-	    (* Normalize breaks *)
-	    accumulate_breaks rem_width ()
-	| (`linebreak as x) ->
-	    (* Start a new line *)
-	    Stream.icons x (Stream.slazy (splitter width))
-	| #ops as x ->
-	    (* Passthrough ops *)
-	    Stream.icons x (Stream.slazy (splitter rem_width))
-      with
-	  Stream.Failure -> Stream.sempty
+      match Stream.peek stream with
+	| None -> Stream.sempty
+	| Some c ->
+	    match c with
+	      | `fragment f ->
+		  (* Handle fragments separately *)
+		  split_fragment f rem_width ()
+	      | `break ->
+		  (* Normalize breaks *)
+		  accumulate_breaks rem_width ()
+	      | (`linebreak as x) ->
+		  (* Start a new line *)
+		  Stream.icons x (Stream.slazy (splitter width))
+	      | #ops as x ->
+		  (* Passthrough ops *)
+		  Stream.icons x (Stream.slazy (splitter rem_width))
     and accumulate_breaks rem_width () =
-      try match Stream.next stream with
-	| `fragment f ->
-	    if rem_width <= 2 then
-	      (* Break the line if not enough space left *)
-	      Stream.icons `linebreak (Stream.slazy (split_fragment f width))
-	    else if rem_width = width then
-	      (* Ignore break at beginning of line *)
-	      split_fragment f rem_width ()
-	    else
-	      (* Insert a break *)
-	      Stream.icons `break (Stream.slazy (split_fragment f (rem_width-1)))
-	| `break ->
-	    (* Just another break in the wall (stream) *)
-	    accumulate_breaks rem_width ()
-	| (`linebreak as x) ->
-	    (* Ignore breaks and start new line*)
-	    Stream.icons x (Stream.slazy (splitter width))
-	| #ops as x ->
-	    (* Pass-through ops *)
-	    Stream.icons x (Stream.slazy (accumulate_breaks rem_width))
-      with
-	  Stream.Failure -> Stream.sempty
+      match Stream.peek stream with
+	| None -> Stream.sempty
+	| Some c ->
+	    match c with
+	      | `fragment f ->
+		  if rem_width <= 2 then
+		    (* Break the line if not enough space left *)
+		    Stream.icons `linebreak (Stream.slazy (split_fragment f width))
+		  else if rem_width = width then
+		    (* Ignore break at beginning of line *)
+		    split_fragment f rem_width ()
+		  else
+		    (* Insert a break *)
+		    Stream.icons `break (Stream.slazy (split_fragment f (rem_width-1)))
+	      | `break ->
+		  (* Just another break in the wall (stream) *)
+		  accumulate_breaks rem_width ()
+	      | (`linebreak as x) ->
+		  (* Ignore breaks and start new line*)
+		  Stream.icons x (Stream.slazy (splitter width))
+	      | #ops as x ->
+		  (* Pass-through ops *)
+		  Stream.icons x (Stream.slazy (accumulate_breaks rem_width))
     and split_fragment frag rem_width () =
       let flen = String.length frag in
 	if flen < rem_width then
@@ -289,17 +291,19 @@ struct
   let justify ~width just stream =
     let rec collect_line accum_rev () =
       (* Collect non-linebreak elements for later justification *)
-      try match Stream.next stream with
-	| `linebreak ->
-	    (* Justify accumulated line *)
+      match Stream.peek stream with
+	| None ->
 	    justify_line (List.rev accum_rev)
-	| (`break as x)
-	| (`fragment _ as x)
-	| (#ops as x) ->
-	    (* Collect elements for current line *)
-	    collect_line (x::accum_rev) ()
-      with
-	  Stream.Failure -> justify_line (List.rev accum_rev)
+	| Some c ->
+	    match c with
+	      | `linebreak ->
+		  (* Justify accumulated line *)
+		  justify_line (List.rev accum_rev)
+	      | (`break as x)
+	      | (`fragment _ as x)
+	      | (#ops as x) ->
+		  (* Collect elements for current line *)
+		  collect_line (x::accum_rev) ()
     and justify_fix left_space right_space accum =
       (* Justify with fixed space left and right *)
       let rec make_stream = function
