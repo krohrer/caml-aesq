@@ -31,7 +31,12 @@ val set_inverted   : t -> bool -> unit
 val set_foreground : t -> color -> unit
 val set_background : t -> color -> unit
 
-(** { 6 High-level ANSI printing *)
+(** {6 High-level ANSI printing } *)
+
+type 'a stream =
+  | SNil
+  | SCons of 'a * 'a stream Lazy.t
+
 type ops = [ 
 | `nop
 | `set_intensity of intensity
@@ -46,36 +51,43 @@ type frag = [ `fragment of string ]
 type breaks = [ `break | `linebreak ]
 type whitespaces = [ `space of int | `newline ]
 
-module LineSeparation :
+module LineSplitter :
 sig
-  type input  = [ frag | breaks | ops ] LazyStream.t
-  type output = [ frag | breaks | ops ] LazyStream.t
+  type input  = [ frag | breaks | ops ]
+  type output = [ frag | breaks | ops ]
 
-  val separate : width:int -> input -> output
+  val split : width:int -> [< input] stream -> [> output] stream
     (** Insert linebreaks so that output is no more than [width] columns. *)
 end
 
 module Justification :
 sig
-  type input  = [ frag | breaks | ops ] LazyStream.t
-  type output = [ frag | whitespaces | ops ] LazyStream.t
+  type input  = [ frag | breaks | ops ]
+  type output = [ frag | whitespaces | ops ]
 
-  val justify : width:int -> justification -> input -> output
+  val justify : width:int -> justification -> [< input] stream -> [> output] stream
     (** Justify linebroken text by converting breaks to spaces. *)
 end
 
 module Tabs :
 sig
-  type input  = [ frag | whitespaces | ops ] Stream.t
-  type output = [ frag | whitespaces | ops ] Stream.t
+  type input  = [ frag | whitespaces | ops ]
+  type output = [ frag | whitespaces | ops ]
 
-  val make : (int * input) list -> output
+  val make : (int * [< input] stream) list -> [> output] stream
+end
+
+module Debug :
+sig
+  type input = [ frag | whitespaces | breaks | ops ]
+
+  val dump : out_channel -> [< input] stream -> unit
 end
 
 module Printer :
 sig
-  type input = [ frag | whitespaces | ops ] Stream.t
+  type input = [ frag | whitespaces | breaks | ops ]
 
-  val print : t -> input -> unit
+  val print : t -> [< input] stream -> unit
     (** Print stream *)
 end

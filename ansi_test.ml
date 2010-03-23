@@ -38,27 +38,31 @@ let random_ops =
     |]
 
 let random_elem () =
-  let r = Random.int 60 in
-    if r < 30 then
+  let r = Random.int 1000 in
+    if r < 600 then
       `fragment (random_word ())
-    else if r < 50 then
-      `space 1
+    else if r < 900 then
+      `break
+    else if r < 902 then
+      `linebreak
     else
       random_ops ()
 
-let random_stream n =
-  Stream.from
-    (fun i ->
-       if i < n then
-	 Some (random_elem ())
-       else
-	 None)
+let rec random_stream i n =
+  if i < n then
+    A.SCons (random_elem (), lazy (random_stream (i + 1) n))
+  else
+    A.SNil
 
 let _ = 
   Random.self_init ();
-  let s = random_stream (1000*1000*100) in
+  let s = random_stream 0 (1000) in
+  let s' = A.LineSplitter.split ~width:80 s in
+  let s'' = A.Justification.justify ~width:80 `left s' in
+    ignore s'';
   let a = A.make stdout in
-    A.Printer.print a s;
+    A.Debug.dump stderr s';
+    A.Printer.print a s';
     A.reset a ();
     A.flush a ();
     ()
