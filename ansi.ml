@@ -196,9 +196,33 @@ let flush p () =
 
 open ExtLib
 
-type 'a stream =
+type 'a stream_cell =
   | SNil
-  | SCons of 'a * 'a stream Lazy.t
+  | SCons of 'a * 'a stream
+and 'a stream = 'a stream_cell Lazy.t
+
+let rec sappend s sapp =
+  match Lazy.force s with
+    | SNil -> sapp
+    | SCons (x, s) ->
+	lazy (SCons (x, sappend s sapp))
+
+let sflatten slist =
+  let rec fold s srest =
+    match Lazy.force s with
+      | SNil ->
+	  begin match srest with
+	    | [] ->
+		SNil
+	    | s::srest ->
+		fold s srest
+	  end
+      | SCons (x, s) ->
+	  SCons (x, lazy (fold s srest))
+  in
+    match slist with
+      | [] -> lazy SNil
+      | s::srest -> lazy (fold s srest)
 
 type ops = [ 
 | `nop
@@ -207,7 +231,15 @@ type ops = [
 | `set_inverted of bool
 | `set_foreground of color
 | `set_background of color
-| `set_context of context
+]
+
+type format_ops = [
+| `set_width of int
+| `set_justification of justification
+]
+
+type context_ops = [
+  `set_context of context
 ]
 
 type frag = [ `fragment of string ]
@@ -221,35 +253,34 @@ struct
   type input  = [ frag | breaks | ops ]
   type output = [ frag | breaks | ops ]
 
-  let rec split' width ~rem_width ?(has_break=false) =
-    function
+  let rec split' width ~rem_width ?(has_break=false) stream =
+    match Lazy.force stream with
       | SNil ->
           SNil
-      | SCons (c, s) ->
-          let stream = Lazy.force s in
-            match c with
-              | `fragment f ->
-                  (* Handle fragments separately *)
-                  split_fragment width ~rem_width ~needs_break:has_break f stream
-              | `break ->
-		  let has_break = rem_width <> width in
-                    (* Ignore break at beginning of line *)
-		    split' width ~rem_width ~has_break stream
-              | (`linebreak as x) ->
-                  (* Explicit line break, make it double*)
-		  let lsapp = lazy (split' width ~rem_width:width stream) in
-                    SCons (x, lazy (SCons (x, lsapp)))
-              | #ops as x ->
-                  (* Passthrough ops *)
-		  let lsapp = lazy (split' width ~rem_width stream) in
-                    SCons (x, lsapp)
+      | SCons (x, stream) ->
+          match x with
+            | `fragment f ->
+                (* Handle fragments separately *)
+                split_fragment width ~rem_width ~needs_break:has_break f stream
+            | `break ->
+		let has_break = rem_width <> width in
+                  (* Ignore break at beginning of line *)
+		  split' width ~rem_width ~has_break stream
+            | (`linebreak as x) ->
+                (* Explicit line break, make it double*)
+		let sapp = lazy (split' width ~rem_width:width stream) in
+                  SCons (x, lazy (SCons (x, sapp)))
+            | #ops as x ->
+                (* Passthrough ops *)
+		let sapp = lazy (split' width ~rem_width stream) in
+                  SCons (x, sapp)
   and split_fragment width ~rem_width ~needs_break frag stream =
     let flen = String.length frag in
     let blen = if needs_break then flen + 1 else flen in
       if blen <= rem_width  then
 	(* fragment (and possibly break) still fit on this line *)
-	let lsapp = lazy (split' width ~rem_width:(rem_width - blen) stream) in
-	let s = SCons (`fragment frag, lsapp)
+	let sapp = lazy (split' width ~rem_width:(rem_width - blen) stream) in
+	let s = SCons (`fragment frag, sapp)
 	in
 	  if needs_break then
 	    SCons (`break, lazy s)
@@ -259,8 +290,8 @@ struct
 	(* fragment must be split anyway, may as well start on this line *)
 	let fleft = String.slice ~last:rem_width frag in
 	let fright = String.slice ~first:rem_width frag in
-	let lsapp = lazy (split_fragment width ~rem_width:width ~needs_break:false fright stream) in
-	let s = SCons (`fragment fleft, lazy (SCons (`linebreak, lsapp)))
+	let sapp = lazy (split_fragment width ~rem_width:width ~needs_break:false fright stream) in
+	let s = SCons (`fragment fleft, lazy (SCons (`linebreak, sapp)))
 	in
 	  if needs_break then
 	    SCons (`break, lazy s)
@@ -268,11 +299,11 @@ struct
 	    s
     else
       (* fragment fits on next line for sure *)
-      let lsapp = lazy (split_fragment width ~rem_width:width ~needs_break:false frag stream) in
-	SCons (`linebreak, lsapp)
+      let sapp = lazy (split_fragment width ~rem_width:width ~needs_break:false frag stream) in
+	SCons (`linebreak, sapp)
 
   let split ~width stream =
-    split' ~rem_width:width width stream
+    lazy (split' ~rem_width:width width stream)
 end
 
 (*----------------------------------------------------------------------------*)
@@ -282,22 +313,33 @@ struct
   type input  = [ frag | breaks | ops ]
   type output = [ frag | whitespaces | ops ]
 
-  let rec collect_line accum_rev width just =
-    (* Collect non-linebreak elements for later justification *)
-    function
+  let rec collect_line accum_rev width just stream =
+    (* Collect non-linebreak elements for later justification  *)
+    match Lazy.force stream with
       | SNil ->
-          justify_line width just (List.rev accum_rev) (lazy SNil)
-      | SCons (c, s) ->
-          let stream = Lazy.force s in
-            match c with
-              | `linebreak ->
-                  (* Justify accumulated line *)
-                  justify_line width just (List.rev accum_rev) (lazy (collect_line [] width just stream))
-              | (`break as x)
-              | (`fragment _ as x)
-              | (#ops as x) ->
-                  (* Collect elements for current line *)
-                  collect_line (x::accum_rev) width just stream
+          justify_line ~special:true width just (List.rev accum_rev) (lazy SNil)
+      | SCons (x, stream) ->
+          match x with
+            | `linebreak -> begin
+                (* Justify accumulated line *)
+		match Lazy.force stream with
+		  | SCons (`linebreak, stream) ->
+		      (* Block justification is special *)
+		      let sapp = lazy (collect_line [] width just stream) in
+			justify_line ~special:true width just (List.rev accum_rev) sapp
+		  | SNil ->
+		      (* Block justification is special *)
+		      let sapp = lazy (collect_line [] width just stream) in
+			justify_line width just (List.rev accum_rev) sapp
+		  | _ ->
+		      let sapp = lazy (collect_line [] width just stream) in
+			justify_line width just (List.rev accum_rev) sapp
+	      end
+            | (`break as x)
+            | (`fragment _ as x)
+            | (#ops as x) ->
+                (* Collect elements for current line *)
+                collect_line (x::accum_rev) width just stream
   and justify_fix left_space right_space accum sapp =
     (* Justify with fixed space left and right *)
     let rec make_stream = function
@@ -330,14 +372,14 @@ struct
       | `break::rest ->
           (* Use integer arithmetic instead of float *)
             SCons (`space (a / breaks),
-                     lazy (make_stream (a mod breaks + rem_space) rest))
+                     lazy (make_stream ((a mod breaks) + rem_space) rest))
       | (`fragment _ as x)::rest
       | (#ops as x)::rest ->
           (* Passthrough for fragments and ops *)
           SCons (x, lazy (make_stream a rest))
     in
       make_stream rem_space accum
-  and justify_line width just accum sapp =
+  and justify_line ?(special=false) width just accum sapp =
     (* Dispatch justification algorithm *)
     let break_count, frag_len = measure_line accum in
     let rem_width = max 0 (width - frag_len - break_count) in
@@ -349,7 +391,10 @@ struct
         | `right ->
             justify_right rem_width accum sapp
         | `block ->
-            justify_block break_count rem_width accum sapp
+	    if special then
+	      justify_left rem_width accum sapp
+	    else
+              justify_block break_count (rem_width + break_count) accum sapp
   and measure_line accum =
     (* Count breaks and measure fragment length *)
     let rec fold break_count frag_len =
@@ -366,82 +411,103 @@ struct
       fold 0 0 accum
 
   let justify ~width just stream =
-    collect_line [] width just stream
+    match Lazy.force stream with
+      | SNil -> lazy SNil
+      | _ -> lazy (collect_line [] width just stream)
 end
 
 (*----------------------------------------------------------------------------*)
 
-module Tabs =
+module Columns =
 struct
   type input  = [ frag | whitespaces | ops ]
   type output = [ frag | whitespaces | ops ]
 
-  let make _ = SNil
+  let make _ = lazy SNil
 end
 
 (*----------------------------------------------------------------------------*)
 
 module Debug =
 struct
-  type input = [ frag | whitespaces | breaks | ops ]
+  type input = [ frag | whitespaces | breaks | ops | format_ops | context_ops ]
 
   open Printf
 
-  let rec dump outc =
-    function
+  let rec dump outc stream =
+    match Lazy.force stream with
       | SNil ->
           Pervasives.flush outc
       | SCons (c, s) ->
-          let stream = Lazy.force s in
-            begin match c with
-              | `nop
-              | `set_intensity _
-              | `set_underline _
-              | `set_inverted _
-              | `set_foreground _
-              | `set_background _
-              | `set_context _ ->
-                  fprintf outc "OP "
-              | `fragment f ->
-                  fprintf outc "%S " f
-              | `break ->
-                  fprintf outc "BR "
-              | `linebreak ->
-                  fprintf outc "LBR\n"
-              | `space n ->
-                  fprintf outc "S(%d) " n
-              | `newline ->
-                  fprintf outc "\n"
-            end;
-            dump outc stream
+           begin match c with
+            | `nop
+	    | `set_justification `left ->
+		fprintf outc "\nLEFT\n"
+	    | `set_justification `center ->
+		fprintf outc "\nCENTER\n"
+	    | `set_justification `right ->
+		fprintf outc "\nRIGHT\n"
+	    | `set_justification `block ->
+		fprintf outc "\nBLOCK\n"
+	    | `set_width w ->
+		fprintf outc "\nWIDTH(%d)\n" w
+	    | #ops ->
+		fprintf outc "OP "
+	    | #context_ops ->
+                fprintf outc "CTX "
+            | `fragment f ->
+                fprintf outc "%S " f
+            | `break ->
+                fprintf outc "BR "
+            | `linebreak ->
+                fprintf outc "LBR\n"
+            | `space n ->
+                fprintf outc "S(%d) " n
+            | `newline ->
+                fprintf outc "NL\n"
+          end;
+          dump outc s
 end
+
+(*----------------------------------------------------------------------------*)
+
+module Formatter =
+struct
+  type input  = [ frag | breaks | ops | format_ops ]
+  type output = [ frag | whitespaces | ops ]
+
+  let format ?(width=78) ?(just=`block) s =
+    lazy SNil
+end
+
+
 
 (*----------------------------------------------------------------------------*)
 
 module Printer =
 struct
-  type input = [ frag | whitespaces | breaks | ops ]
+  type input = [ frag | whitespaces | breaks | ops | context_ops ]
 
-  let rec print ansi =
-    function
+  let rec print ansi stream =
+    match Lazy.force stream with
       | SNil -> flush ansi ()
       | SCons (c, s) ->
-          let stream = Lazy.force s in
-            begin match c with
-              | `fragment f ->
-                  print_string ansi f
-              | #ops as o ->
-                  print_ops ansi o
-              | `space n ->
-                  print_space ansi n
-              | `newline ->
-                  print_newline ansi ()
-              | `break ->
-                  print_string ansi "_"
-              | `linebreak ->
-                  print_string ansi "\\\n"
-            end;
-            print ansi stream
+          begin match c with
+            | `fragment f ->
+                print_string ansi f
+            | #ops
+	    | #context_ops as o ->
+                print_ops ansi o
+            | `space n ->
+                print_space ansi n
+            | `newline ->
+                print_newline ansi ()
+            | `break ->
+                print_string ansi "_"
+            | `linebreak ->
+                print_string ansi "\\\n"
+          end;
+          print ansi s
   and print_ops ansi =
     function
       | `nop ->

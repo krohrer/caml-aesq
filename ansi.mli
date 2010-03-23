@@ -33,9 +33,13 @@ val set_background : t -> color -> unit
 
 (** {6 High-level ANSI printing } *)
 
-type 'a stream =
+type 'a stream_cell =
   | SNil
-  | SCons of 'a * 'a stream Lazy.t
+  | SCons of 'a * 'a stream
+and 'a stream = 'a stream_cell Lazy.t
+
+val sappend : 'a stream -> 'a stream -> 'a stream
+val sflatten : 'a stream list -> 'a stream
 
 type ops = [ 
 | `nop
@@ -44,50 +48,62 @@ type ops = [
 | `set_inverted of bool
 | `set_foreground of color
 | `set_background of color
-| `set_context of context
+]
+
+type context_ops = [
+  `set_context of context
+]
+
+type format_ops = [
+| `set_width of int
+| `set_justification of justification
 ]
 
 type frag = [ `fragment of string ]
 type breaks = [ `break | `linebreak ]
 type whitespaces = [ `space of int | `newline ]
 
+(** Split text into lines for further processing*)
 module LineSplitter :
 sig
   type input  = [ frag | breaks | ops ]
   type output = [ frag | breaks | ops ]
 
-  val split : width:int -> [< input] stream -> [> output] stream
+  val split : width:int -> input stream -> [> output] stream
     (** Insert linebreaks so that output is no more than [width] columns. *)
 end
 
+(** Justify *)
 module Justification :
 sig
   type input  = [ frag | breaks | ops ]
   type output = [ frag | whitespaces | ops ]
 
-  val justify : width:int -> justification -> [< input] stream -> [> output] stream
+  val justify : width:int -> justification -> input stream -> [> output] stream
     (** Justify linebroken text by converting breaks to spaces. *)
 end
 
-module Tabs :
+module Formatter :
 sig
-  type input  = [ frag | whitespaces | ops ]
+  type input  = [ frag | breaks | ops | format_ops ]
   type output = [ frag | whitespaces | ops ]
 
-  val make : (int * [< input] stream) list -> [> output] stream
+  val format : ?width:int -> ?just:justification -> input stream -> [> output] stream
 end
 
+(** Debug output of streams *)
 module Debug :
 sig
-  type input = [ frag | whitespaces | breaks | ops ]
+  type input = [ frag | whitespaces | breaks | ops | context_ops | format_ops ]
 
-  val dump : out_channel -> [< input] stream -> unit
+  val dump : out_channel -> input stream -> unit
 end
 
+(** Pretty printing streams using ANSI codes *)
 module Printer :
 sig
-  type input = [ frag | whitespaces | breaks | ops ]
+  type input = [ frag | whitespaces | breaks | ops | context_ops ]
 
-  val print : t -> [< input] stream -> unit
+  val print : t -> input stream -> unit
     (** Print stream *)
 end
