@@ -221,7 +221,7 @@ struct
   type input  = [ frag | breaks | ops ]
   type output = [ frag | breaks | ops ]
 
-  let rec splitter width ~rem_width =
+  let rec split' width ~rem_width ?(has_break=false) =
     function
       | SNil ->
           SNil
@@ -230,60 +230,49 @@ struct
             match c with
               | `fragment f ->
                   (* Handle fragments separately *)
-                  split_fragment width ~rem_width f stream
+                  split_fragment width ~rem_width ~needs_break:has_break f stream
               | `break ->
-                  (* Normalize breaks *)
-                  accumulate_breaks width ~rem_width stream
+		  let has_break = rem_width <> width in
+                    (* Ignore break at beginning of line *)
+		    split' width ~rem_width ~has_break stream
               | (`linebreak as x) ->
-                  (* Start a new line *)
-                  SCons (x, lazy (splitter width ~rem_width:width stream))
+                  (* Explicit line break, make it double*)
+		  let lsapp = lazy (split' width ~rem_width:width stream) in
+                    SCons (x, lazy (SCons (x, lsapp)))
               | #ops as x ->
                   (* Passthrough ops *)
-                  SCons (x, lazy (splitter width ~rem_width stream))
-  and accumulate_breaks width ~rem_width =
-    function
-      | SNil ->
-          SNil
-      | SCons (c, s) ->
-          let stream = Lazy.force s in
-            match c with
-              | `fragment f ->
-                  if rem_width = width then
-                    (* Ignore break at beginning of line *)
-                    split_fragment width ~rem_width f stream
-                  else if rem_width <= 2 then
-                    (* Break the line if not enough space left *)
-                    SCons (`linebreak, lazy (split_fragment width ~rem_width:width f stream))
-                  else 
-                    (* Insert a break *)
-                    SCons (`break, lazy (split_fragment width ~rem_width:(rem_width-1) f stream))
-              | `break ->
-                  (* Just another break in the wall (stream) *)
-                  accumulate_breaks width ~rem_width stream
-              | (`linebreak as x) ->
-                  (* Ignore breaks and start new line*)
-                  SCons (x, lazy (splitter width ~rem_width:width stream))
-              | #ops as x ->
-                  (* Pass-through ops *)
-                  SCons (x, lazy (accumulate_breaks width ~rem_width stream))
-  and split_fragment width ~rem_width frag stream =
+		  let lsapp = lazy (split' width ~rem_width stream) in
+                    SCons (x, lsapp)
+  and split_fragment width ~rem_width ~needs_break frag stream =
     let flen = String.length frag in
-      if flen <= rem_width then
-        (* fragment still fits on this line *)
-        SCons (`fragment frag, lazy (splitter width ~rem_width:(rem_width - flen) stream))
+    let blen = if needs_break then flen + 1 else flen in
+      if blen <= rem_width  then
+	(* fragment (and possibly break) still fit on this line *)
+	let lsapp = lazy (split' width ~rem_width:(rem_width - blen) stream) in
+	let s = SCons (`fragment frag, lsapp)
+	in
+	  if needs_break then
+	    SCons (`break, lazy s)
+	  else
+	    s
       else if flen > width then
-        (* fragment must be split anyway, may as well start on this line *)
-        let left = String.slice ~last:rem_width frag in
-        let right = String.slice ~first:rem_width frag in
-          SCons (`fragment left,
-                   lazy (SCons (`linebreak,
-                                  lazy (split_fragment width ~rem_width:width right stream))))
-      else
-        (* fragment fits on next line for sure *)
-        SCons (`linebreak, lazy (split_fragment width ~rem_width:width frag stream))
+	(* fragment must be split anyway, may as well start on this line *)
+	let fleft = String.slice ~last:rem_width frag in
+	let fright = String.slice ~first:rem_width frag in
+	let lsapp = lazy (split_fragment width ~rem_width:width ~needs_break:false fright stream) in
+	let s = SCons (`fragment fleft, lazy (SCons (`linebreak, lsapp)))
+	in
+	  if needs_break then
+	    SCons (`break, lazy s)
+	  else
+	    s
+    else
+      (* fragment fits on next line for sure *)
+      let lsapp = lazy (split_fragment width ~rem_width:width ~needs_break:false frag stream) in
+	SCons (`linebreak, lsapp)
 
   let split ~width stream =
-    splitter ~rem_width:width width stream
+    split' ~rem_width:width width stream
 end
 
 (*----------------------------------------------------------------------------*)
@@ -314,7 +303,8 @@ struct
     let rec make_stream = function
       | [] ->
           (* Space on the right *)
-          SCons (`space right_space, sapp)
+          SCons (`space right_space,
+		 lazy (SCons (`newline, sapp)))
       | `break::rest ->
           (* Break is one space worth (fixed) *)
           SCons (`space 1, lazy (make_stream rest))
@@ -350,7 +340,7 @@ struct
   and justify_line width just accum sapp =
     (* Dispatch justification algorithm *)
     let break_count, frag_len = measure_line accum in
-    let rem_width = max 0 (width - frag_len) in
+    let rem_width = max 0 (width - frag_len - break_count) in
       match just with
         | `left ->
             justify_left rem_width accum sapp

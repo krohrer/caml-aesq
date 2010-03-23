@@ -41,12 +41,12 @@ let random_elem () =
   let r = Random.int 1000 in
     if r < 600 then
       `fragment (random_word ())
-    else if r < 900 then
+    else if r < 990 then
       `break
-    else if r < 902 then
-      `linebreak
-    else
+    else if r < 998 then
       random_ops ()
+    else
+      `linebreak
 
 let rec random_stream i n =
   if i < n then
@@ -54,15 +54,24 @@ let rec random_stream i n =
   else
     A.SNil
 
+open Printf
+
 let _ = 
   Random.self_init ();
   let s = random_stream 0 (1000) in
-  let s' = A.LineSplitter.split ~width:80 s in
-  let s'' = A.Justification.justify ~width:80 `left s' in
+  let s' = A.LineSplitter.split ~width:40 s in
+  let s'' = A.Justification.justify ~width:40 `block s' in
     ignore s'';
   let a = A.make stdout in
     A.Debug.dump stderr s';
+    fprintf stdout "\n================================================================================\n%!";
+    A.Debug.dump stderr s'';
+    fprintf stdout "\n================================================================================\n%!";
     A.Printer.print a s';
+    A.reset a ();
+    A.flush a ();
+    fprintf stdout "\n================================================================================\n%!";
+    A.Printer.print a s'';
     A.reset a ();
     A.flush a ();
     ()
