@@ -56,9 +56,9 @@ open Printf
 
 let _ = 
   Random.self_init ();
-  let s = random_stream 0 (1000*1000) in
-  let s' = A.LineSplitter.split ~width:80 s in
-  let s'' = A.Justification.justify ~width:80 `block s' in
+  let s = random_stream 0 (1000*1000*1000) in
+  let s' = A.LineSplitter.split ~width:250 s in
+  let s'' = A.Justification.justify ~width:250 `block s' in
     ignore s'';
   let a = A.make stdout in
     (* A.Debug.dump stderr s'; *)

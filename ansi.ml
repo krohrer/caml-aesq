@@ -3,6 +3,36 @@ type intensity = [`faint | `normal | `bold]
 type justification = [`left | `center | `right | `block ]
 type underline = [`single | `none]
 
+let justification_to_string =
+  function
+    | `left -> "left"
+    | `center -> "center"
+    | `right -> "right"
+    | `block -> "block"
+
+let intensity_to_string =
+  function
+    | `faint -> "faint"
+    | `normal -> "normal"
+    | `bold -> "bold"
+
+let underline_to_string =
+  function
+    | `single -> "single"
+    | `none -> "none"
+
+let color_to_string =
+  function
+    | `black -> "black"
+    | `red -> "red"
+    | `green -> "green"
+    | `yellow -> "yellow"
+    | `blue -> "blue"
+    | `magenta -> "magenta"
+    | `cyan -> "cyan"
+    | `white -> "white"
+    | `default -> "default"
+
 type context = {
   c_intensity : intensity;
   c_underline : underline;
@@ -10,6 +40,14 @@ type context = {
   c_foreground : color;
   c_background : color;
 }
+
+let context_to_string c =
+  Printf.sprintf "{int=%s, ul=%s, inv=%b, fg=%s, bg=%s}" 
+    (intensity_to_string c.c_intensity)
+    (underline_to_string c.c_underline)
+    c.c_inverted
+    (color_to_string c.c_foreground)
+    (color_to_string c.c_background)
 
 type t = {
   mutable p_intensity : intensity;
@@ -221,6 +259,7 @@ let sflatten slist =
 
 type ops = [ 
 | `nop
+| `set_context of context
 | `set_intensity of intensity
 | `set_underline of underline
 | `set_inverted of bool
@@ -229,12 +268,12 @@ type ops = [
 ]
 
 type format_ops = [
-| `set_width of int
-| `set_justification of justification
-]
-
-type context_ops = [
-  `set_context of context
+| `push_justification of justification
+| `push_context of context
+| `push_width of int
+| `pop_justification
+| `pop_context
+| `pop_width
 ]
 
 type frag = [ `fragment of string ]
@@ -425,43 +464,87 @@ end
 
 module Debug =
 struct
-  type input = [ frag | whitespaces | breaks | ops | format_ops | context_ops ]
+  type input = [ frag | whitespaces | breaks | ops | format_ops ]
 
   open Printf
 
-  let rec dump outc stream =
+  let rec dump' outc justs widths ctxs stream =
     match Lazy.force stream with
       | SNil ->
-          Pervasives.flush outc
-      | SCons (c, s) ->
-           begin match c with
-            | `nop
-	    | `set_justification `left ->
-		fprintf outc "\nLEFT\n"
-	    | `set_justification `center ->
-		fprintf outc "\nCENTER\n"
-	    | `set_justification `right ->
-		fprintf outc "\nRIGHT\n"
-	    | `set_justification `block ->
-		fprintf outc "\nBLOCK\n"
-	    | `set_width w ->
-		fprintf outc "\nWIDTH(%d)\n" w
-	    | #ops ->
-		fprintf outc "OP "
-	    | #context_ops ->
-                fprintf outc "CTX "
+	  Pervasives.flush outc
+      | SCons (#format_ops as x, stream) ->
+	  dump_format_ops outc justs widths ctxs stream x
+      | SCons (#ops as x, stream)
+      | SCons (#frag as x, stream)
+      | SCons (#breaks as x, stream)
+      | SCons (#whitespaces as x, stream) ->
+	  begin match x with 
+	    | `nop ->
+		fprintf outc "NOP "
+	    | `set_intensity i ->
+		fprintf outc "INTENSITY(%s) " (intensity_to_string i);
+	    | `set_underline u ->
+		fprintf outc "UNDERLINE(%s) " (underline_to_string u);
+	    | `set_inverted i ->
+		fprintf outc "INVERTED(%b) " i
+	    | `set_foreground c ->
+		fprintf outc "FOREGROUND(%s) " (color_to_string c);
+	    | `set_background c ->
+		fprintf outc "BACKGROUND(%s) " (color_to_string c);
+	    | `set_context c ->
+		fprintf outc "CONTEXT(%s) " (context_to_string c);
             | `fragment f ->
-                fprintf outc "%S " f
+		fprintf outc "%S " f;
             | `break ->
-                fprintf outc "BR "
+		fprintf outc "BR ";
             | `linebreak ->
-                fprintf outc "LBR\n"
+		fprintf outc "LBR\n";
             | `space n ->
-                fprintf outc "S(%d) " n
+		fprintf outc "S(%d) " n;
             | `newline ->
-                fprintf outc "NL\n"
-          end;
-          dump outc s
+		fprintf outc "NL\n";
+	  end;
+    	  dump' outc justs widths ctxs stream
+  and dump_format_ops outc justs widths ctxs stream =
+    function
+      | `push_justification j ->
+	  fprintf outc "\nPUSH JUSTIFICATION(%s)\n" (justification_to_string j);
+	  dump' outc (j::justs) widths ctxs stream
+      | `pop_justification ->
+	  begin match justs with
+	    | [] ->
+		fprintf outc "\nPOP JUSTIFICATION: STACK EMPTY!\n";
+		dump' outc justs widths ctxs stream
+	    | j::justs -> 
+		fprintf outc "\nPOP JUST -> %s\n" (justification_to_string j);
+		dump' outc justs widths ctxs stream
+	  end
+      | `push_context c ->
+	  fprintf outc "\nPUSH CONTEXT\n";
+	  dump' outc justs widths (c::ctxs) stream
+      | `pop_context ->
+	  begin match ctxs with
+	    | [] ->
+		fprintf outc "\nPOP CONTEXTS: STACK EMPTY!\n";
+		dump' outc justs widths ctxs stream
+	    | c::ctxs ->
+		fprintf outc "\nPOP CONTEXT\n";
+		dump' outc justs widths ctxs stream
+	  end
+      | `push_width w ->
+	  fprintf outc "\nPUSH WIDTH(%d)\n" w;
+	  dump' outc justs (w::widths) ctxs stream
+      | `pop_width ->
+	  begin match widths with
+	    | [] ->
+		fprintf outc "\nPOP WIDTH: STACK EMPTY\n";
+	    | w::widths ->
+		fprintf outc "\nPOP WIDTH -> %d\n" w;
+		dump' outc justs widths ctxs stream
+	  end
+
+  let dump outc stream =
+    dump' outc [] [] [] stream
 end
 
 (*----------------------------------------------------------------------------*)
@@ -471,8 +554,12 @@ struct
   type input  = [ frag | breaks | ops | format_ops ]
   type output = [ frag | whitespaces | ops ]
 
-  let format ?(width=78) ?(just=`block) s =
-    lazy SNil
+  let rec format ?(width=78) ?(just=`block) stream =
+    match Lazy.force stream with
+      | SNil ->
+	  lazy SNil
+      | SCons (c, stream) ->
+	  lazy SNil
 end
 
 
@@ -481,7 +568,7 @@ end
 
 module Printer =
 struct
-  type input = [ frag | whitespaces | breaks | ops | context_ops ]
+  type input = [ frag | whitespaces | breaks | ops ]
 
   let rec print ansi stream =
     match Lazy.force stream with
@@ -490,8 +577,7 @@ struct
           begin match c with
             | `fragment f ->
                 print_string ansi f
-            | #ops
-	    | #context_ops as o ->
+            | #ops as o ->
                 print_ops ansi o
             | `space n ->
                 print_space ansi n

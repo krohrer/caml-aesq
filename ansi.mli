@@ -20,6 +20,12 @@ val make_context :
   ?background:color ->
   unit -> context
 
+val color_to_string : color -> string
+val intensity_to_string : intensity -> string
+val justification_to_string : justification -> string
+val underline_to_string : underline -> string
+val context_to_string : context -> string
+
 val intensity  : context -> intensity
 val underline  : context -> underline
 val inverted   : context -> bool
@@ -61,15 +67,16 @@ type ops = [
 | `set_inverted of bool
 | `set_foreground of color
 | `set_background of color
-]
-
-type context_ops = [
-  `set_context of context
+| `set_context of context
 ]
 
 type format_ops = [
-| `set_width of int
-| `set_justification of justification
+| `push_justification of justification
+| `push_context of context
+| `push_width of int
+| `pop_justification
+| `pop_context
+| `pop_width
 ]
 
 type frag = [ `fragment of string ]
@@ -96,6 +103,7 @@ sig
     (** Justify linebroken text by converting breaks to spaces. *)
 end
 
+(**  *)
 module Formatter :
 sig
   type input  = [ frag | breaks | ops | format_ops ]
@@ -107,7 +115,7 @@ end
 (** Debug output of streams *)
 module Debug :
 sig
-  type input = [ frag | whitespaces | breaks | ops | context_ops | format_ops ]
+  type input = [ frag | whitespaces | breaks | ops | format_ops ]
 
   val dump : out_channel -> input stream -> unit
 end
@@ -115,7 +123,7 @@ end
 (** Pretty printing streams using ANSI codes *)
 module Printer :
 sig
-  type input = [ frag | whitespaces | breaks | ops | context_ops ]
+  type input = [ frag | whitespaces | breaks | ops ]
 
   val print : t -> input stream -> unit
     (** Print stream *)
