@@ -106,8 +106,8 @@ end
 (**  *)
 module Format :
 sig
-  type input  = [ `fragment of string | `break | `linebreak | ops ]
-  type output = [ `fragment of string | `space of int | ops ]
+  type input  = [ `fragment of string | `break | `linebreak | `context of context ]
+  type output = [ `fragment of string | `space of int | `context of context ]
 
   val format :
     ?width:int ->

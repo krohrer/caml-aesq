@@ -405,8 +405,8 @@ struct
           SCons (`newline, sapp)
       | `break::rest ->
           (* Use integer arithmetic instead of float *)
-            SCons (`space (a / breaks),
-                     lazy (make_stream ((a mod breaks) + rem_space) rest))
+          SCons (`space (a / breaks),
+                 lazy (make_stream ((a mod breaks) + rem_space) rest))
       | (`fragment _ as x)::rest
       | (#ops as x)::rest ->
           (* Passthrough for fragments and ops *)
@@ -454,39 +454,100 @@ end
 
 module Format =
 struct
-  type input  = [ `fragment of string | `break | `linebreak | ops ]
-  type output = [ `fragment of string | `space of int | ops ]
+  type input  = [ `fragment of string | `break | `linebreak | `context of context ]
+  type output = [ `fragment of string | `space of int | `context of context ]
 
-  let rec measure_line context break_count width elem_count =
+  (* Fill the line-array backwards *)
+  let rec fill_line ~line ~break_space ~break_count ?(a=break_space) k =
+    function
+      | [] -> ()
+      | `break::rest ->
+	  (* Bresenham stepping for greater accuracy! *)
+	  let a = a mod break_count + break_space in
+	  line.(k) <- `space (a / break_count);
+	  fill_line ~line ~break_space ~break_count ~a (k - 1) rest
+      | (`fragment _ as x)::rest
+      | (`context _ as x)::rest ->
+	  line.(k) <- x;
+	  fill_line ~line ~break_space ~break_count ~a (k - 1) rest
+
+  (* Measure line and possibly find last active context (for next line) *)
+  let rec measure_line ?(count=0) ?(break_count=0) ?(length=0) ?last_context =
     function
       | [] ->
-	  context, break_count, width, elem_count
+	  count, break_count, length, last_context
       | x::rest ->
-	  let elem_count = elem_count + 1 in
+	  let count = count + 1 in
 	    match x with
-	      | `space n ->
-		  let width = width + n in
-		    measure_line context break_count width elem_count rest
 	      | `fragment f ->
-		  let width = width + String.length f in
-		    measure_line context break_count width elem_count rest
+		  let length = length + String.length f in
+		    measure_line ~count ~break_count ~length ?last_context rest
 	      | `break ->
 		  let break_count = break_count + 1 in
-		    measure_line context break_count width elem_count rest
-	      | `set_context ctx ->
-		  measure_line ctx break_count width elem_count rest
-	      | #ops ->
-		  measure_line context break_count width elem_count rest
+		    measure_line ~count ~break_count ~length ?last_context rest
+	      | `context c ->
+		  let last_context = Option.default c last_context in
+		    measure_line ~count ~break_count ~length ~last_context rest
 
-  let justify_line ?(partial=false) ~line_rev context =
-    context, [||]
+  (* Return the context for the next line and an array of justified
+     line elements *)
+  let justify_line ?(partial=false) ~width ~justification ~line_rev context =
+    let count, break_count, length, last_context = measure_line line_rev in
+    let justification =
+      match justification with
+	| `block -> if partial || break_count = 0 then `left else `right
+	| j -> j
+    in
+    let line =
+      match justification with
+	| `left ->
+	    (* Add left-over space on the right side *)
+	    let space = width - length - break_count in
+	    let break_space = break_count in
+	    let line = Array.make (count + 2) (`context context) in
+	      (* line.(0) <- `context context; *)
+	      fill_line ~line ~break_space ~break_count count line_rev;
+	      line.(count + 1) <- `space space;
+	      line
+	| `center ->
+	    (* Add a bit of left-over space on both sides *)
+	    let space = width - length - break_count in
+	    let break_space = break_count in
+	    let left_space = space / 2 in
+	    let right_space = space - left_space in
+	    let line = Array.make (count + 3) (`context context) in
+	      (* line.(0) <- `context context; *)
+	      line.(1) <- `space left_space;
+	      fill_line ~line ~break_space ~break_count (count + 1) line_rev;
+	      line.(count + 2) <- `space right_space;
+	      line
+	| `right ->
+	    (* Add left-over space on the left side *)
+	    let space = width - length - break_count in
+	    let break_space = break_count in
+	    let line = Array.make (count + 2) (`context context) in
+	      (* line.(0) <- `context context; *)
+	      line.(1) <- `space space;
+	      fill_line ~line ~break_space ~break_count (count + 1) line_rev;
+	      line
+	| `block ->
+	    (* Distribute *)
+	    assert (break_count > 0);
+	    let break_space = width - length in
+	    let line = Array.make (count + 2) (`context context) in
+	      (* line.(0) <- `context context; *)
+	      fill_line ~line ~break_space ~break_count count line_rev;
+	      line
+    in
+      Option.default context last_context, line
 
+  (* Format: Width and justification can be part of a closure, so we
+     dont have to pass them along as parameters *)
   let format
       ?(width=78)
       ?(justification=`block)
       =
-    (* Width and justification can be part of a closure, so we dont
-       have to pass them along as parameters*)
+    (* Collect line elements for justification *)
     let rec collect_line
 	?(rem_width=width) 
 	?(has_break=false) 
@@ -494,12 +555,10 @@ struct
 	context
 	stream 
 	=
-      (* Collect *)
       match Lazy.force stream with
 	| SNil ->
 	    let _, line =
-	      let partial = true in
-		justify_line ~partial ~line_rev context
+	      justify_line ~partial:true ~width ~justification ~line_rev context
 	    in
 	    let sappend = lazy SNil in
 	      SCons (line, sappend) 
@@ -511,12 +570,17 @@ struct
 		  let has_break = rem_width <> width in
 		    collect_line ~rem_width ~has_break ~line_rev context stream
 	      | `linebreak ->
+		  (* A linebreak *)
 		  let context, line = 
-		    let partial = true in
-		      justify_line ~partial ~line_rev context
-		  and sappend = lazy (collect_line context stream) in
+		    justify_line ~partial:true ~width ~justification ~line_rev context
+		  and sappend =
+		    lazy (collect_line context stream)
+		  in
 		    SCons (line, sappend)
-	      | ops as x ->
+	      | `context _ as x ->
+		  (* Passthrough for the moment. [context] is the
+		     context at the start of the current line, so we
+		     cannot yet change it to something else.*)
 		  let line_rev = x :: line_rev in
 		    collect_line ~rem_width ~has_break ~line_rev context stream
 
@@ -558,16 +622,15 @@ struct
 	    else 
 	      `fragment frag_left :: line_rev
 	  in
-	  let context, line = justify_line ~line_rev context in
+	  let context, line = justify_line ~width ~justification ~line_rev context in
 	  let sappend = lazy (collect_fragment (`fragment frag_right) context stream) in
 	    SCons (line, sappend)
 	else
 	  (* Fragment fits on next line for sure *)
-	  let context, line = justify_line ~line_rev context in
+	  let context, line = justify_line ~width ~justification ~line_rev context in
 	  let sappend = lazy (collect_line context stream)
 	  in
 	    SCons (line, sappend)
-	      
     in
       (* We do not want the stream to be in the closure above.  It
        * would not be garbage collected otherwise.  *)
