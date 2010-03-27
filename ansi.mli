@@ -10,7 +10,7 @@ type justification = [`left | `center | `right | `block ]
 type underline = [`single | `none]
 
 type context
-type t
+type ansi
 
 val make_context :
   ?intensity:intensity ->
@@ -26,6 +26,8 @@ val justification_to_string : justification -> string
 val underline_to_string : underline -> string
 val context_to_string : context -> string
 
+(* TODO : these should operate on ansi, not on context. Provide
+   context_* variants instead *)
 val intensity  : context -> intensity
 val underline  : context -> underline
 val inverted   : context -> bool
@@ -38,97 +40,37 @@ val set_inverted   : bool -> context -> context
 val set_foreground : color -> context -> context
 val set_background : color -> context -> context
 
-val make : ?context:context -> out_channel -> t
-val flush : t -> unit -> unit
+val make : ?context:context -> out_channel -> ansi
+val flush : ansi -> unit -> unit
 
-val context : t -> context
-val set_context : t -> context -> unit
-val map_context : t -> (context -> context) -> unit
+val context : ansi -> context
+val set_context : ansi -> context -> unit
+val map_context : ansi -> (context -> context) -> unit
 
-val print_space : t -> int -> unit
-val print_string : t -> string -> unit
-val print_newline : t -> unit -> unit
-val printf : t -> ('a,unit,string,unit) format4 -> 'a
+val print_space : ansi -> int -> unit
+val print_string : ansi -> string -> unit
+val print_newline : ansi -> unit -> unit
+val printf : ansi -> ('a,unit,string,unit) format4 -> 'a
 
 (** {6 High-level ANSI printing } *)
-
-type 'a stream_cell =
+type 'a cell =
   | SNil
   | SCons of 'a * 'a stream
-and 'a stream = 'a stream_cell Lazy.t
+and 'a stream = 'a cell Lazy.t
 
-val sappend : 'a stream -> 'a stream -> 'a stream
-val sflatten : 'a stream list -> 'a stream
+type raw = [ `fragment of string | `break | `linebreak | `set_context of context ]
+type linel = [ `fragment of string | `space of int | `set_context of context]
 
-type ops = [ 
-| `nop
-| `set_intensity of intensity
-| `set_underline of underline
-| `set_inverted of bool
-| `set_foreground of color
-| `set_background of color
-| `set_context of context
-]
+val append : 'a stream -> 'a stream -> 'a stream
+val flatten : 'a stream list -> 'a stream
 
-type format_ops = [
-| `push_justification of justification
-| `push_context of context
-| `push_width of int
-| `pop_justification
-| `pop_context
-| `pop_width
-]
+val format :
+  ?width:int ->
+  ?justification:justification ->
+  ?context:context ->
+  [< raw] stream -> [> linel] array stream
 
-type frag = [ `fragment of string ]
-type breaks = [ `break | `linebreak ]
-type whitespaces = [ `space of int | `newline ]
+val dump_raw : out_channel -> [< raw] stream -> unit
+val dump : out_channel -> [< linel] array stream -> unit
 
-(** Split text into lines for further processing*)
-module LineSplitter :
-sig
-  type input  = [ frag | breaks | ops ]
-  type output = [ frag | breaks | ops ]
-
-  val split : width:int -> input stream -> [> output] stream
-    (** Insert linebreaks so that output is no more than [width] columns. *)
-end
-
-(** Justify *)
-module Justification :
-sig
-  type input  = [ frag | breaks | ops ]
-  type output = [ frag | whitespaces | ops ]
-
-  val justify : width:int -> justification -> input stream -> [> output] stream
-    (** Justify linebroken text by converting breaks to spaces. *)
-end
-
-(**  *)
-module Format :
-sig
-  type input  = [ `fragment of string | `break | `linebreak | `set_context of context ]
-  type output = [ `fragment of string | `space of int | `set_context of context ]
-
-  val format :
-    ?width:int ->
-    ?justification:justification ->
-    ?context:context ->
-    input stream -> [> output] array stream
-end
-
-(** Debug output of streams *)
-module Debug :
-sig
-  type input = [ frag | whitespaces | breaks | ops | format_ops ]
-
-  val dump : out_channel -> input stream -> unit
-end
-
-(** Pretty printing streams using ANSI codes *)
-module Printer :
-sig
-  type input = [ frag | whitespaces | breaks | ops ]
-
-  val print : t -> input stream -> unit
-    (** Print stream *)
-end
+val print : ansi -> [< linel] array stream -> unit

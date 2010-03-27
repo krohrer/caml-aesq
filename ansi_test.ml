@@ -47,7 +47,9 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s = random_stream 0 (100) in
+  let s = random_stream 0 (1000*10) in
   let a = make stdout in
-    Printer.print a s;
+    dump_raw stdout s;
+    dump stdout (format s);
+    print a (format s);
     ()
