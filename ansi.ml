@@ -452,6 +452,66 @@ end
 
 (*----------------------------------------------------------------------------*)
 
+module Format =
+struct
+  type input  = [ `fragment of string | `space of int | `break | `linebreak | ops ]
+  type output = [ `fragment of string | `space of int | ops ]
+
+  let rec measure_line context break_count width elem_count =
+    function
+      | [] ->
+	  context, break_count, width, elem_count
+      | x::rest ->
+	  let elem_count = elem_count + 1 in
+	    match x with
+	      | `space n ->
+		  measure_line context break_count (n + width) elem_count rest
+	      | `fragment f ->
+		  measure_line context break_count (String.length f + width) elem_count rest
+	      | `break ->
+		  measure_line context (break_count + 1) width elem_count rest
+	      | `set_context ctx ->
+		  measure_line ctx break_count width elem_count rest
+	      | #ops ->
+		  measure_line context break_count width elem_count rest
+
+  let format ?(width=78) ?(justification=`block) =
+    let rec collect_line ~rem_width ~has_break ~line_rev stream =
+      match Lazy.force stream with
+	| SNil ->
+	    let sappend = lazy SNil in
+	      justify_line ~partial:true ~line_rev sappend
+	| SCons (x, stream) ->
+	    match x with
+	      | `fragment f ->
+		  collect_fragment ~rem_width ~has_break ~line_rev f stream
+	      | `space n ->
+		  collect_space ~rem_width ~has_break ~line_rev n stream
+	      | `break ->
+		  let has_break = rem_width <> width in
+		  let line_rev = x::line_rev in
+		    collect_line ~rem_width ~has_break ~line_rev stream
+	      | `linebreak ->
+		  let sappend =
+		    collect_line ~rem_width:width ~has_break:false ~line_rev:[] stream
+		  in
+                    justify_line ~partial:true ~line_rev sappend
+	      | ops as x ->
+		  let line_rev = x::line_rev in
+		    collect_line ~rem_width ~has_break ~line_rev stream
+    and collect_fragment ~rem_width ~has_break ~line_rev frag stream =
+      justify_line ~partial:false ~line_rev (lazy SNil)
+    and collect_space ~rem_width ~has_break ~line_rev n stream =
+      justify_line ~partial:false ~line_rev (lazy SNil)
+    and justify_line ~partial ~line_rev sappend =
+      sappend
+    in
+      collect_line ~rem_width:width ~has_break:false ~line_rev:[]
+	(* Justification.justify ~width justification (LineSplitter.split ~width stream) *)
+end
+
+(*----------------------------------------------------------------------------*)
+
 module Columns =
 struct
   type input  = [ frag | whitespaces | ops ]
@@ -546,23 +606,6 @@ struct
   let dump outc stream =
     dump' outc [] [] [] stream
 end
-
-(*----------------------------------------------------------------------------*)
-
-module Formatter =
-struct
-  type input  = [ frag | breaks | ops | format_ops ]
-  type output = [ frag | whitespaces | ops ]
-
-  let rec format ?(width=78) ?(just=`block) stream =
-    match Lazy.force stream with
-      | SNil ->
-	  lazy SNil
-      | SCons (c, stream) ->
-	  lazy SNil
-end
-
-
 
 (*----------------------------------------------------------------------------*)
 

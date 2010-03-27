@@ -104,12 +104,12 @@ sig
 end
 
 (**  *)
-module Formatter :
+module Format :
 sig
-  type input  = [ frag | breaks | ops | format_ops ]
-  type output = [ frag | whitespaces | ops ]
+  type input  = [ `fragment of string | `space of int | `break | `linebreak | ops ]
+  type output = [ `fragment of string | `space of int | ops ]
 
-  val format : ?width:int -> ?just:justification -> input stream -> [> output] stream
+  val format : ?width:int -> ?justification:justification -> input stream -> [> output] array stream
 end
 
 (** Debug output of streams *)
