@@ -454,7 +454,7 @@ end
 
 module Format =
 struct
-  type input  = [ `fragment of string | `space of int | `break | `linebreak | ops ]
+  type input  = [ `fragment of string | `break | `linebreak | ops ]
   type output = [ `fragment of string | `space of int | ops ]
 
   let rec measure_line context break_count width elem_count =
@@ -465,48 +465,105 @@ struct
 	  let elem_count = elem_count + 1 in
 	    match x with
 	      | `space n ->
-		  measure_line context break_count (n + width) elem_count rest
+		  let width = width + n in
+		    measure_line context break_count width elem_count rest
 	      | `fragment f ->
-		  measure_line context break_count (String.length f + width) elem_count rest
+		  let width = width + String.length f in
+		    measure_line context break_count width elem_count rest
 	      | `break ->
-		  measure_line context (break_count + 1) width elem_count rest
+		  let break_count = break_count + 1 in
+		    measure_line context break_count width elem_count rest
 	      | `set_context ctx ->
 		  measure_line ctx break_count width elem_count rest
 	      | #ops ->
 		  measure_line context break_count width elem_count rest
 
-  let format ?(width=78) ?(justification=`block) =
-    let rec collect_line ~rem_width ~has_break ~line_rev stream =
+  let format
+      ?(width=78)
+      ?(justification=`block)
+      =
+    let rec collect_line
+	?(rem_width=width) 
+	?(has_break=false) 
+	?(line_rev=[])
+	stream 
+	=
       match Lazy.force stream with
 	| SNil ->
+	    let line =
+	      let partial = true in
+		justify_line ~partial line_rev
+	    in
 	    let sappend = lazy SNil in
-	      justify_line ~partial:true ~line_rev sappend
+	      SCons (line, sappend) 
 	| SCons (x, stream) ->
 	    match x with
-	      | `fragment f ->
+	      | `fragment _ as f ->
 		  collect_fragment ~rem_width ~has_break ~line_rev f stream
-	      | `space n ->
-		  collect_space ~rem_width ~has_break ~line_rev n stream
 	      | `break ->
 		  let has_break = rem_width <> width in
-		  let line_rev = x::line_rev in
 		    collect_line ~rem_width ~has_break ~line_rev stream
 	      | `linebreak ->
-		  let sappend =
-		    collect_line ~rem_width:width ~has_break:false ~line_rev:[] stream
-		  in
-                    justify_line ~partial:true ~line_rev sappend
+		  let line = 
+		    let partial = true in
+		      justify_line ~partial line_rev
+		  and sappend = lazy (collect_line stream) in
+		    SCons (line, sappend)
 	      | ops as x ->
-		  let line_rev = x::line_rev in
+		  let line_rev = x :: line_rev in
 		    collect_line ~rem_width ~has_break ~line_rev stream
-    and collect_fragment ~rem_width ~has_break ~line_rev frag stream =
-      justify_line ~partial:false ~line_rev (lazy SNil)
-    and collect_space ~rem_width ~has_break ~line_rev n stream =
-      justify_line ~partial:false ~line_rev (lazy SNil)
-    and justify_line ~partial ~line_rev sappend =
-      sappend
+
+    and collect_fragment
+	?(rem_width=width)
+	?(has_break=false)
+	?(line_rev=[])
+	(`fragment frag as f)
+	stream
+	=
+      let len = String.length frag in
+      let break_len =
+	if has_break then
+	  len + 1
+	else
+	  len
+      in
+	if break_len <= rem_width then
+	  (* fragment (and possibly break) still fit on this line *)
+	  let rem_width = rem_width - break_len in
+	  let line_rev =
+	    if has_break then
+	      `break :: f :: line_rev
+	    else
+	      f :: line_rev
+	  in
+	    collect_line ~rem_width ~line_rev stream
+	else if len > width then
+	  (* fragment must be split anyway, may as well start on this line *)
+	  let frag_left = String.slice ~last:rem_width frag and
+	      frag_right = String.slice ~first:rem_width frag
+	  in
+	  let line_rev =
+	    if has_break then
+	      `break :: `fragment frag_left :: line_rev
+	    else 
+	      `fragment frag_left :: line_rev
+	  in
+	  let line = justify_line line_rev
+	  and sappend = lazy (collect_fragment (`fragment frag_right) stream)
+	  in
+	    SCons (line, sappend)
+	else
+	  (* fragment fits on next line for sure *)
+	  let line = justify_line line_rev
+	  and sappend = lazy (collect_line stream)
+	  in
+	    SCons (line, sappend)
+	  
+    and justify_line ?(partial=false) line_rev =
+      [||]
+
     in
-      collect_line ~rem_width:width ~has_break:false ~line_rev:[]
+      fun stream -> lazy (collect_line stream)
 	(* Justification.justify ~width justification (LineSplitter.split ~width stream) *)
 end
 

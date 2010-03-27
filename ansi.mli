@@ -106,7 +106,7 @@ end
 (**  *)
 module Format :
 sig
-  type input  = [ `fragment of string | `space of int | `break | `linebreak | ops ]
+  type input  = [ `fragment of string | `break | `linebreak | ops ]
   type output = [ `fragment of string | `space of int | ops ]
 
   val format : ?width:int -> ?justification:justification -> input stream -> [> output] array stream
