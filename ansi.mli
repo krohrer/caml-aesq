@@ -109,7 +109,11 @@ sig
   type input  = [ `fragment of string | `break | `linebreak | ops ]
   type output = [ `fragment of string | `space of int | ops ]
 
-  val format : ?width:int -> ?justification:justification -> input stream -> [> output] array stream
+  val format :
+    ?width:int ->
+    ?justification:justification ->
+    ?context:context ->
+    input stream -> [> output] array stream
 end
 
 (** Debug output of streams *)
