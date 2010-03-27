@@ -12,7 +12,7 @@ type underline = [`single | `none]
 type context
 type t
 
-val make_context : 
+val make_context :
   ?intensity:intensity ->
   ?underline:underline ->
   ?inverted:bool ->
@@ -106,8 +106,8 @@ end
 (**  *)
 module Format :
 sig
-  type input  = [ `fragment of string | `break | `linebreak | `context of context ]
-  type output = [ `fragment of string | `space of int | `context of context ]
+  type input  = [ `fragment of string | `break | `linebreak | `set_context of context ]
+  type output = [ `fragment of string | `space of int | `set_context of context ]
 
   val format :
     ?width:int ->

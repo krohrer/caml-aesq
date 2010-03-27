@@ -42,7 +42,7 @@ type context = {
 }
 
 let context_to_string c =
-  Printf.sprintf "{int=%s, ul=%s, inv=%b, fg=%s, bg=%s}" 
+  Printf.sprintf "{intensity=%s, underline=%s, inverted=%b, foreground=%s, background=%s}" 
     (intensity_to_string c.c_intensity)
     (underline_to_string c.c_underline)
     c.c_inverted
@@ -454,8 +454,8 @@ end
 
 module Format =
 struct
-  type input  = [ `fragment of string | `break | `linebreak | `context of context ]
-  type output = [ `fragment of string | `space of int | `context of context ]
+  type input  = [ `fragment of string | `break | `linebreak | `set_context of context ]
+  type output = [ `fragment of string | `space of int | `set_context of context ]
 
   (* Fill the line-array backwards *)
   let rec fill_line ~line ~break_space ~break_count ?(a=break_space) k =
@@ -467,7 +467,7 @@ struct
 	  line.(k) <- `space (a / break_count);
 	  fill_line ~line ~break_space ~break_count ~a (k - 1) rest
       | (`fragment _ as x)::rest
-      | (`context _ as x)::rest ->
+      | (`set_context _ as x)::rest ->
 	  line.(k) <- x;
 	  fill_line ~line ~break_space ~break_count ~a (k - 1) rest
 
@@ -485,7 +485,7 @@ struct
 	      | `break ->
 		  let break_count = break_count + 1 in
 		    measure_line ~count ~break_count ~length ?last_context rest
-	      | `context c ->
+	      | `set_context c ->
 		  let last_context = Option.default c last_context in
 		    measure_line ~count ~break_count ~length ~last_context rest
 
@@ -504,8 +504,8 @@ struct
 	    (* Add left-over space on the right side *)
 	    let space = width - length - break_count in
 	    let break_space = break_count in
-	    let line = Array.make (count + 2) (`context context) in
-	      (* line.(0) <- `context context; *)
+	    let line = Array.make (count + 2) (`set_context context) in
+	      (* line.(0) <- `set_context context; *)
 	      fill_line ~line ~break_space ~break_count count line_rev;
 	      line.(count + 1) <- `space space;
 	      line
@@ -515,8 +515,8 @@ struct
 	    let break_space = break_count in
 	    let left_space = space / 2 in
 	    let right_space = space - left_space in
-	    let line = Array.make (count + 3) (`context context) in
-	      (* line.(0) <- `context context; *)
+	    let line = Array.make (count + 3) (`set_context context) in
+	      (* line.(0) <- `set_context context; *)
 	      line.(1) <- `space left_space;
 	      fill_line ~line ~break_space ~break_count (count + 1) line_rev;
 	      line.(count + 2) <- `space right_space;
@@ -525,8 +525,8 @@ struct
 	    (* Add left-over space on the left side *)
 	    let space = width - length - break_count in
 	    let break_space = break_count in
-	    let line = Array.make (count + 2) (`context context) in
-	      (* line.(0) <- `context context; *)
+	    let line = Array.make (count + 2) (`set_context context) in
+	      (* line.(0) <- `set_context context; *)
 	      line.(1) <- `space space;
 	      fill_line ~line ~break_space ~break_count (count + 1) line_rev;
 	      line
@@ -534,8 +534,8 @@ struct
 	    (* Distribute *)
 	    assert (break_count > 0);
 	    let break_space = width - length in
-	    let line = Array.make (count + 2) (`context context) in
-	      (* line.(0) <- `context context; *)
+	    let line = Array.make (count + 2) (`set_context context) in
+	      (* line.(0) <- `set_context context; *)
 	      fill_line ~line ~break_space ~break_count count line_rev;
 	      line
     in
@@ -577,7 +577,7 @@ struct
 		    lazy (collect_line context stream)
 		  in
 		    SCons (line, sappend)
-	      | `context _ as x ->
+	      | `set_context _ as x ->
 		  (* Passthrough for the moment. [context] is the
 		     context at the start of the current line, so we
 		     cannot yet change it to something else.*)
