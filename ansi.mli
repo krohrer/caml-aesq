@@ -42,6 +42,7 @@ val set_background : color -> context -> context
 
 val make : ?context:context -> out_channel -> ansi
 val flush : ansi -> unit -> unit
+val reset : ansi -> unit -> unit
 
 val context : ansi -> context
 val set_context : ansi -> context -> unit

@@ -42,7 +42,7 @@ type context = {
 }
 
 let context_to_string c =
-  Printf.sprintf "{intensity=%s, underline=%s, inverted=%b, foreground=%s, background=%s}" 
+  Printf.sprintf "{I=%s,U=%s,N=%b,F=%s,B=%s}" 
     (intensity_to_string c.c_intensity)
     (underline_to_string c.c_underline)
     c.c_inverted
@@ -225,6 +225,9 @@ let flush p () =
   enforce_attributes p ();
   Pervasives.flush p.p_outc
 
+let reset p () = 
+  set_context p (make_context ())
+
 (*----------------------------------------------------------------------------*)
 
 open ExtLib
@@ -298,7 +301,7 @@ let justify_line ?(partial=false) ~width ~justification ~line_rev context =
   let count, break_count, length, last_context = measure_line line_rev in
   let justification =
     match justification with
-      | `block -> if partial || break_count = 0 then `left else `right
+      | `block -> if partial || break_count = 0 then `left else `block
       | j -> j
   in
   let line =
@@ -348,7 +351,7 @@ let justify_line ?(partial=false) ~width ~justification ~line_rev context =
    dont have to pass them along as parameters *)
 let format
     ?(width=78)
-    ?(justification=`block)
+    ?(justification=`left)
     =
   (* Collect line elements for justification *)
   let rec collect_line
@@ -376,9 +379,8 @@ let format
 		(* A linebreak *)
 		let context, line = 
 		  justify_line ~partial:true ~width ~justification ~line_rev context
-		and sappend =
-		  lazy (collect_line context stream)
 		in
+		let sappend = lazy (collect_line context stream) in
 		  SCons (line, sappend)
 	    | `set_context _ as x ->
 		(* Passthrough for the moment. [context] is the
@@ -408,7 +410,7 @@ let format
 	let rem_width = rem_width - break_len in
 	let line_rev =
 	  if has_break then
-	    `break :: f :: line_rev
+	    f :: `break :: line_rev
 	  else
 	    f :: line_rev
 	in
@@ -421,7 +423,7 @@ let format
 	in
 	let line_rev =
 	  if has_break then
-	    `break :: `fragment frag_left :: line_rev
+	    `fragment frag_left :: `break :: line_rev
 	  else 
 	    `fragment frag_left :: line_rev
 	in
@@ -431,8 +433,7 @@ let format
       else
 	(* Fragment fits on next line for sure *)
 	let context, line = justify_line ~width ~justification ~line_rev context in
-	let sappend = lazy (collect_line context stream)
-	in
+	let sappend = lazy (collect_fragment f context stream) in
 	  SCons (line, sappend)
   in
     (* We do not want the stream to be in the closure above.  It
@@ -456,11 +457,11 @@ let rec dump_raw outc stream =
 	  | `fragment f ->
 	      fprintf outc "%S " f
 	  | `break ->
-	      fprintf outc "BREAK "
+	      fprintf outc "BR "
 	  | `linebreak -> 
-	      fprintf outc "LINEBREAK\n"
+	      fprintf outc "LBR\n"
 	  | `set_context c ->
-	      fprintf outc "SET_CONTEXT(%s)" (context_to_string c)
+	      fprintf outc "CTX(%s) " (context_to_string c)
 	end;
 	dump_raw outc stream
 
@@ -475,9 +476,9 @@ let rec dump outc stream =
 	     | `fragment f ->
 		 fprintf outc "%S " f
 	     | `space n ->
-		 fprintf outc "SPACE(%d) " n
+		 fprintf outc "SP(%d) " n
 	     | `set_context c ->
-		 fprintf outc "SET_CONTEXT(%s) " (context_to_string c))
+		 fprintf outc "CTX(%s) " (context_to_string c))
 	  x;
 	fprintf outc "\n";
 	dump outc stream
@@ -485,6 +486,7 @@ let rec dump outc stream =
 let rec print ansi stream =
   match Lazy.force stream with
     | SNil ->
+	reset ansi ();
 	flush ansi ()
     | SCons (x, stream) ->
 	Array.iter
