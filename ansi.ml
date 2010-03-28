@@ -343,11 +343,12 @@ let justify_line ?(partial=false) ~width ~justification line_rev =
 	    fill_line ~line ~break_space ~break_count ~last:(count-1) line_rev;
 	    line
 
-let format_min_width = 1
+let format_min_width = 1 (* Minimum width allowed for formatting *)
 
-(* Width and justification can be part of a closure, so we
-   dont have to pass them along as parameters *)
 let format' ?(width=78) ?(justification=`left) =
+  (* Width and justification can be part of a closure, so we
+     dont have to pass them along as parameters *)
+  
   (* Collect line elements for justification *)
   let rec collect_line
       ~context
@@ -358,137 +359,220 @@ let format' ?(width=78) ?(justification=`left) =
       (* Reverse list of line elements, start each line explicitly
 	 with the current context. Makes it easier to concat lines
 	 later on. *)
-      ?dismissable_opt
+      ?dismissables
       (* Line elements including elements after the last printable
 	 that might be dismissed, if no printable was to
 	 follow before the end of the line. *)
-      stream'
-      
+      stream
       =
-    begin match Lazy.force stream' with
+    match Lazy.force stream with
       | SNil ->
-	  let line =
+	  (* Done *)
+	  collect_done
+	    ~context
+	    ~line_rev
+	    ~dismissables
+	    ()
+      | SCons (x, stream) ->
+	  (* Dispatch *)
+	  begin match x with
+	    | `fragment _ as fragment ->
+		collect_fragment
+		  ~context
+		  ~rem_width
+		  ~line_rev
+		  ~dismissables
+		  fragment
+		  stream
+	    | `break ->
+		collect_break
+		  ~context
+		  ~rem_width
+		  ~line_rev
+		  ~dismissables
+		  stream
+	    | `linebreak ->
+		collect_linebreak
+		  ~context
+		  ~line_rev
+		  stream
+	    | `set_context _ as set_context ->
+		collect_set_context
+		  ~context
+		  ~rem_width
+		  ~line_rev
+		  ~dismissables
+		  set_context
+		  stream
+	  end
+  
+  (* Justify last line, if there are any printables. *)
+  and collect_done
+      ~context
+      ~line_rev
+      ~dismissables
+      ()
+      =
+    let line =
+      justify_line
+	~partial:true
+	~width
+	~justification
+	(Option.default line_rev dismissables)
+    in
+      SCons (line, lazy SNil)
+
+  (* Collect fragment and justify line if necessary *)
+  and collect_fragment
+      ~context
+      ~rem_width
+      ~line_rev
+      ~dismissables
+      (`fragment frag as fragment)
+      stream
+      =
+    let len = String.length frag in
+      if len <= rem_width then
+	(* Fragment still fits on this line *)
+	collect_line
+	  ~context
+	  ~rem_width:(rem_width - len)
+	  ~line_rev:(fragment :: Option.default line_rev dismissables)
+	  stream
+      else if len > width && rem_width >= format_min_width then
+	(* Fragment must be split anyway, may as well start on this
+	   line, if possible. It must always be possible if the line
+	   does not yet contain any printable elements. *)
+	let line =
+	  let frag_left = String.slice ~last:rem_width frag in
 	    justify_line
-	      ~partial:true
 	      ~width
 	      ~justification
-	      (Option.default line_rev dismissable_opt)
-	  in
-	    SCons (line, lazy SNil)
-      | SCons (x, stream) ->
-	  begin match x with
-	    | `fragment frag as f ->
-		(* Collect fragment and justify line if necessary *)
-		let len = String.length frag in
-		  if len <= rem_width then
-		    (* Fragment still fits on this line *)
-		    collect_line
-		      ~context
-		      ~rem_width:(rem_width - len)
-		      ~line_rev:(f :: Option.default line_rev dismissable_opt)
-		      stream
-		  else if len > width && rem_width >= format_min_width then
-		    (* Fragment must be split anyway, may as well start on this
-		       line, if possible. *)
-		    let line =
-		      let frag_left = String.slice ~last:rem_width frag in
-			justify_line
-			  ~width
-			  ~justification
-			  (`fragment frag_left :: Option.default line_rev dismissable_opt)
-		    and cell =
-		      let frag_right = String.slice ~first:rem_width frag in
-			(* Prefix stream for next line with left-overs
-			   from current line *)
-			SCons (`fragment frag_right,
-			       stream)
-		    in
-		      SCons (line,
-			     lazy (collect_line
-				     ~context
-				     (lazy cell)))
-		  else
-		    (* Fragment does not fit on current line, retry on
-		       next line. *)
-		    let line =
-		      justify_line
-			~width
-			~justification
-			line_rev
-		    in
-		      SCons (line,
-			     lazy (collect_line ~context stream'))
+	      (`fragment frag_left :: Option.default line_rev dismissables)
+	and cell =
+	  let frag_right = String.slice ~first:rem_width frag in
+	    (* Prefix stream for next line with left-overs
+	       from current line *)
+	    SCons (`fragment frag_right,
+		   stream)
+	in
+	  SCons (line,
+		 lazy (collect_line
+			 ~context
+			 (lazy cell)))
+      else
+	(* Fragment does not fit on current line, retry on
+	   next line. *)
+	let line =
+	  justify_line
+	    ~width
+	    ~justification
+	    line_rev
+	and cell =
+	  (* This exact cell already exists, but we dont want to
+	     pass it as an argument since it only gets used in this
+	     case. So we simply construct it anew. (Thank science we
+	     have immutable streams!) *)
+	  SCons (fragment, stream)
+	in
+	  SCons (line,
+		 lazy (collect_line ~context (lazy cell)))
 
-	    | `break as b ->
-		if width = rem_width then
-		  (* Simply ignore break at the beginning of the
-		     line *)
-		  collect_line
-		    ~context
-		    ~rem_width
-		    ~line_rev
-		    stream
-		else
-		  (* Line already has more than one column *)
-		  begin match dismissable_opt with
-		    | None ->
-			(* Add a dismissable break at cost of (at
-			   least) one column *)
-			let dismissable_opt =
-			  b :: Option.default line_rev dismissable_opt
-			in
-			  collect_line
-			    ~context
-			    ~rem_width:(rem_width - 1)
-			    ~line_rev
-			    ~dismissable_opt
-			    stream
-		    | Some _ ->
-			(* Already has dismissable break, ignore *)
-			collect_line
-			  ~context
-			  ~rem_width
-			  ~line_rev
-			  ?dismissable_opt
-			  stream
-		  end
+  (* Break: Ignore at the beginning of the line, or add it to dismissables. *)
+  and collect_break
+      ~context
+      ~rem_width
+      ~line_rev
+      ~dismissables
+      stream
+      =
+    if width = rem_width then
+      (* Simply ignore break at the beginning of the
+	 line *)
+      collect_line
+	~context
+	~rem_width
+	~line_rev
+	stream
+    else
+      (* Line already has more than one column *)
+      begin match dismissables with
+	| None ->
+	    (* Add a dismissable break at cost of (at least) one
+	       column, if there is still space left. *)
+	    if rem_width > 1 then
+	      let dismissables =
+		`break :: Option.default line_rev dismissables
+	      in
+		collect_line
+		  ~context
+		  ~rem_width:(rem_width - 1)
+		  ~line_rev
+		  ~dismissables
+		  stream
+	    else
+	      let line =
+		justify_line
+		  ~width
+		  ~justification
+		  line_rev
+	      in
+		SCons (line,
+		       lazy (collect_line context stream))
+	| Some _ ->
+	    (* Already has dismissable break, ignore *)
+	    collect_line
+	      ~context
+	      ~rem_width
+	      ~line_rev
+	      ?dismissables
+	      stream
+      end
 
-	    | `linebreak ->
-		(* A linebreak: justify line without loose breaks and
-		   continue with next line *)
-		let line = 
-		  justify_line
-		    ~partial:true
-		    ~width
-		    ~justification
-		    line_rev
-		in
-		  SCons (line,
-			 lazy (collect_line context stream))
+  (* Linebreak: justify line without loose breaks and
+     continue with next line *)
+  and collect_linebreak
+      ~context
+      ~line_rev
+      stream
+      =
+    let line = 
+      justify_line
+	~partial:true
+	~width
+	~justification
+	line_rev
+    in
+      SCons (line,
+	     lazy (collect_line context stream))
 
-	    | `set_context context as x ->
-		(* Update current context *)
-		begin match dismissable_opt with
-		  | None ->
-		      (* Simply add to current line if we have no
-			 loose breaks *)
-		      collect_line
-			~context
-			~rem_width
-			~line_rev:(x :: line_rev)
-			stream
-		  | Some breaks ->
-		      (* We have one or more loose breaks after a
-			 fragment, so we add it to that list. *)
-		      collect_line
-			~context
-			~rem_width
-			~line_rev
-			~dismissable_opt:(x :: breaks)
-			stream
-		end
-	  end
-    end
+  (* Set context: Update current context and add it to the other elements *)
+  and collect_set_context
+      ~context
+      ~rem_width
+      ~line_rev
+      ~dismissables
+      set_context
+      stream
+      =
+    match dismissables with
+      | None ->
+	  (* Simply add to current line if we have no
+	     loose breaks *)
+	  collect_line
+	    ~context
+	    ~rem_width
+	    ~line_rev:(set_context :: line_rev)
+	    stream
+      | Some breaks ->
+	  (* We have one or more loose breaks after a
+	     fragment, so we add it to that list. *)
+	  collect_line
+	    ~context
+	    ~rem_width
+	    ~line_rev
+	    ~dismissables:(set_context :: breaks)
+	    stream
   in
     collect_line
 
