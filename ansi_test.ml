@@ -47,13 +47,12 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s = random_stream 0 (1000) in
+  let s = random_stream 0 (1000*1000*10) in
   let a = make stdout in
-  let fs = format ~justification:`center s in
-    dump_raw stdout s;
-    dump stdout fs;
-    print a (format ~justification:`left s);
-    print a (format ~justification:`center s);
-    print a (format ~justification:`right s);
+    (* dump_raw stdout s; *)
+    (* dump stdout fs; *)
+    (* print a (format ~justification:`left s); *)
+    (* print a (format ~justification:`center s); *)
+    (* print a (format ~justification:`right s); *)
     print a (format ~justification:`block s);
     ()
