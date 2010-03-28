@@ -59,6 +59,9 @@ type 'a cell =
   | SCons of 'a * 'a stream
 and 'a stream = 'a cell Lazy.t
 
+type printable = [ `fragment of string | `space of int ]
+type non_printable = [ `break | `linebreak | `set_context of context ]
+
 type raw = [ `fragment of string | `break | `linebreak | `set_context of context ]
 type linel = [ `fragment of string | `space of int | `set_context of context]
 

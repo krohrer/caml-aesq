@@ -237,6 +237,9 @@ type 'a cell =
   | SCons of 'a * 'a stream
 and 'a stream = 'a cell Lazy.t
 
+type printable = [ `fragment of string | `space of int ]
+type non_printable = [ `break | `linebreak | `set_context of context ]
+
 type raw = [ `fragment of string | `break | `linebreak | `set_context of context ]
 type linel = [ `fragment of string | `space of int | `set_context of context]
 
@@ -264,56 +267,54 @@ let flatten slist =
       | s::srest -> lazy (fold s srest)
 
 (* Fill the line-array backwards *)
-let rec fill_line ~line ~break_space ~break_count ?(a=break_space) k =
+let rec fill_line ~line ~break_space ~break_count ?(a=break_space) ~last =
   function
     | [] -> ()
     | `break::rest ->
 	(* Bresenham stepping for greater accuracy! *)
 	let a = a mod break_count + break_space in
-	  line.(k) <- `space (a / break_count);
-	  fill_line ~line ~break_space ~break_count ~a (k - 1) rest
+	  line.(last) <- `space (a / break_count);
+	  let last = last - 1 in
+	    fill_line ~line ~break_space ~break_count ~a ~last rest
     | (`fragment _ as x)::rest
     | (`set_context _ as x)::rest ->
-	line.(k) <- x;
-	fill_line ~line ~break_space ~break_count ~a (k - 1) rest
+	line.(last) <- x;
+	let last = last - 1 in
+	  fill_line ~line ~break_space ~break_count ~a ~last rest
 
 (* Measure line and possibly find last active context (for next line) *)
-let rec measure_line ?(count=0) ?(break_count=0) ?(length=0) ?last_context =
+let rec measure_line ?(count=0) ?(break_count=0) ?(length=0) =
   function
-    | [] ->
-	count, break_count, length, last_context
+    | [] -> count, break_count, length
     | x::rest ->
 	let count = count + 1 in
 	  match x with
 	    | `fragment f ->
 		let length = length + String.length f in
-		  measure_line ~count ~break_count ~length ?last_context rest
+		  measure_line ~count ~break_count ~length rest
 	    | `break ->
 		let break_count = break_count + 1 in
-		  measure_line ~count ~break_count ~length ?last_context rest
-	    | `set_context c ->
-		let last_context = Option.default c last_context in
-		  measure_line ~count ~break_count ~length ~last_context rest
+		  measure_line ~count ~break_count ~length rest
+	    | `set_context _ ->
+		measure_line ~count ~break_count ~length rest
 
 (* Return the context for the next line and an array of justified
    line elements *)
-let justify_line ?(partial=false) ~width ~justification ~line_rev context =
-  let count, break_count, length, last_context = measure_line line_rev in
+let justify_line ?(partial=false) ~width ~justification line_rev =
+  let count, break_count, length = measure_line line_rev in
   let justification =
     match justification with
       | `block -> if partial || break_count = 0 then `left else `block
       | j -> j
   in
-  let line =
     match justification with
       | `left ->
 	  (* Add left-over space on the right side *)
 	  let space = width - length - break_count in
 	  let break_space = break_count in
-	  let line = Array.make (count + 2) (`set_context context) in
-	    (* line.(0) <- `set_context context; *)
-	    fill_line ~line ~break_space ~break_count count line_rev;
-	    line.(count + 1) <- `space space;
+	  let line = Array.make (count + 1) (`space space) in
+	    fill_line ~line ~break_space ~break_count ~last:(count-1) line_rev;
+	    (* line.(count) <- `space space; *)
 	    line
       | `center ->
 	  (* Add a bit of left-over space on both sides *)
@@ -321,118 +322,182 @@ let justify_line ?(partial=false) ~width ~justification ~line_rev context =
 	  let break_space = break_count in
 	  let left_space = space / 2 in
 	  let right_space = space - left_space in
-	  let line = Array.make (count + 3) (`set_context context) in
-	    (* line.(0) <- `set_context context; *)
-	    line.(1) <- `space left_space;
-	    fill_line ~line ~break_space ~break_count (count + 1) line_rev;
-	    line.(count + 2) <- `space right_space;
+	  let line = Array.make (count + 2) (`space left_space) in
+	    (* line.(0) <- `space left_space; *)
+	    fill_line ~line ~break_space ~break_count ~last:count line_rev;
+	    line.(count + 1) <- `space right_space;
 	    line
       | `right ->
 	  (* Add left-over space on the left side *)
 	  let space = width - length - break_count in
 	  let break_space = break_count in
-	  let line = Array.make (count + 2) (`set_context context) in
-	    (* line.(0) <- `set_context context; *)
-	    line.(1) <- `space space;
-	    fill_line ~line ~break_space ~break_count (count + 1) line_rev;
+	  let line = Array.make (count + 1) (`space space) in
+	    (* line.(0) <- `space space; *)
+	    fill_line ~line ~break_space ~break_count ~last:count line_rev;
 	    line
       | `block ->
 	  (* Distribute *)
 	  assert (break_count > 0);
 	  let break_space = width - length in
-	  let line = Array.make (count + 2) (`set_context context) in
-	    (* line.(0) <- `set_context context; *)
-	    fill_line ~line ~break_space ~break_count count line_rev;
+	  let line = Array.make count (`space 0) in
+	    fill_line ~line ~break_space ~break_count ~last:(count-1) line_rev;
 	    line
-  in
-    Option.default context last_context, line
 
-(* Format: Width and justification can be part of a closure, so we
+let format_min_width = 1
+
+(* Width and justification can be part of a closure, so we
    dont have to pass them along as parameters *)
-let format
-    ?(width=78)
-    ?(justification=`left)
-    =
+let format' ?(width=78) ?(justification=`left) =
   (* Collect line elements for justification *)
   let rec collect_line
-      ?(rem_width=width) 
-      ?(has_break=false) 
-      ?(line_rev=[])
-      context
-      stream' 
+      ~context
+      (* Current context *)
+      ?(rem_width=width)
+      (* Remaining width *)
+      ?(line_rev=[`set_context context])
+      (* Reverse list of line elements, start each line explicitly
+	 with the current context. Makes it easier to concat lines
+	 later on. *)
+      ?dismissable_opt
+      (* Line elements including elements after the last printable
+	 that might be dismissed, if no printable was to
+	 follow before the end of the line. *)
+      stream'
+      
       =
-    match Lazy.force stream' with
+    begin match Lazy.force stream' with
       | SNil ->
-	  let _, line =
-	    justify_line ~partial:true ~width ~justification ~line_rev context
+	  let line =
+	    justify_line
+	      ~partial:true
+	      ~width
+	      ~justification
+	      (Option.default line_rev dismissable_opt)
 	  in
-	  let sappend = lazy SNil in
-	    SCons (line, sappend) 
+	    SCons (line, lazy SNil)
       | SCons (x, stream) ->
-	  match x with
+	  begin match x with
 	    | `fragment frag as f ->
 		(* Collect fragment and justify line if necessary *)
 		let len = String.length frag in
-		let break_len =
-		  if has_break then
-		    len + 1
-		  else
-		    len
-		in
-		  if break_len <= rem_width then
-		    (* Fragment (and possibly break) still fit on this line *)
-		    let rem_width = rem_width - break_len in
-		    let line_rev =
-		      if has_break then
-			f :: `break :: line_rev
-		      else
-			f :: line_rev
-		    in
-		      collect_line ~rem_width ~line_rev context stream
-		  else if len > width then
+		  if len <= rem_width then
+		    (* Fragment still fits on this line *)
+		    collect_line
+		      ~context
+		      ~rem_width:(rem_width - len)
+		      ~line_rev:(f :: Option.default line_rev dismissable_opt)
+		      stream
+		  else if len > width && rem_width >= format_min_width then
 		    (* Fragment must be split anyway, may as well start on this
-		       line *)
-		    let frag_left = String.slice ~last:rem_width frag and
-			frag_right = String.slice ~first:rem_width frag
+		       line, if possible. *)
+		    let line =
+		      let frag_left = String.slice ~last:rem_width frag in
+			justify_line
+			  ~width
+			  ~justification
+			  (`fragment frag_left :: Option.default line_rev dismissable_opt)
+		    and cell =
+		      let frag_right = String.slice ~first:rem_width frag in
+			(* Prefix stream for next line with left-overs
+			   from current line *)
+			SCons (`fragment frag_right,
+			       stream)
 		    in
-		    let line_rev =
-		      if has_break then
-			`fragment frag_left :: `break :: line_rev
-		      else 
-			`fragment frag_left :: line_rev
-		    in
-		    let context, line = justify_line ~width ~justification ~line_rev context in
-		    let frag_stream = lazy (SCons (`fragment frag_right, stream)) in
-		    let sappend = lazy (collect_line context frag_stream) in
-		      SCons (line, sappend)
+		      SCons (line,
+			     lazy (collect_line
+				     ~context
+				     (lazy cell)))
 		  else
-		    (* Fragment fits on next line for sure *)
-		    let context, line = justify_line ~width ~justification ~line_rev context in
-		    let sappend = lazy (collect_line context stream') in
-		      SCons (line, sappend)
-	    | `break ->
-		let has_break = rem_width <> width in
-		  collect_line ~rem_width ~has_break ~line_rev context stream
+		    (* Fragment does not fit on current line, retry on
+		       next line. *)
+		    let line =
+		      justify_line
+			~width
+			~justification
+			line_rev
+		    in
+		      SCons (line,
+			     lazy (collect_line ~context stream'))
+
+	    | `break as b ->
+		if width = rem_width then
+		  (* Simply ignore break at the beginning of the
+		     line *)
+		  collect_line
+		    ~context
+		    ~rem_width
+		    ~line_rev
+		    stream
+		else
+		  (* Line already has more than one column *)
+		  begin match dismissable_opt with
+		    | None ->
+			(* Add a dismissable break at cost of (at
+			   least) one column *)
+			let dismissable_opt =
+			  b :: Option.default line_rev dismissable_opt
+			in
+			  collect_line
+			    ~context
+			    ~rem_width:(rem_width - 1)
+			    ~line_rev
+			    ~dismissable_opt
+			    stream
+		    | Some _ ->
+			(* Already has dismissable break, ignore *)
+			collect_line
+			  ~context
+			  ~rem_width
+			  ~line_rev
+			  ?dismissable_opt
+			  stream
+		  end
+
 	    | `linebreak ->
-		(* A linebreak *)
-		let context, line = 
-		  justify_line ~partial:true ~width ~justification ~line_rev context
+		(* A linebreak: justify line without loose breaks and
+		   continue with next line *)
+		let line = 
+		  justify_line
+		    ~partial:true
+		    ~width
+		    ~justification
+		    line_rev
 		in
-		let sappend = lazy (collect_line context stream) in
-		  SCons (line, sappend)
-	    | `set_context _ as x ->
-		(* Passthrough for the moment. [context] is the
-		   context at the start of the current line, so we
-		   cannot yet change it to something else.*)
-		let line_rev = x :: line_rev in
-		  collect_line ~rem_width ~has_break ~line_rev context stream
+		  SCons (line,
+			 lazy (collect_line context stream))
+
+	    | `set_context context as x ->
+		(* Update current context *)
+		begin match dismissable_opt with
+		  | None ->
+		      (* Simply add to current line if we have no
+			 loose breaks *)
+		      collect_line
+			~context
+			~rem_width
+			~line_rev:(x :: line_rev)
+			stream
+		  | Some breaks ->
+		      (* We have one or more loose breaks after a
+			 fragment, so we add it to that list. *)
+		      collect_line
+			~context
+			~rem_width
+			~line_rev
+			~dismissable_opt:(x :: breaks)
+			stream
+		end
+	  end
+    end
   in
-    (* We do not want the stream to be in the closure above.  It
-     * would not be garbage collected otherwise.  *)
-  let format' ?(context=make_context ()) stream =
-    lazy (collect_line context stream)
-  in
-    format'
+    collect_line
+
+(* We do not want the stream to be in the closure above.  Otherwise,
+   its cells would not be garbage collected until the stream was
+   consumed entirely. *)
+let format ?(width=78) ?(justification=`left) ?(context=make_context ()) stream =
+  let width = max format_min_width width in
+    lazy (format' ~width ~justification ~context stream)
 
 (*----------------------------------------------------------------------------*)
 
