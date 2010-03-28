@@ -552,7 +552,7 @@ let format' ?(width=78) ?(justification=`left) =
       ~rem_width
       ~line_rev
       ~dismissables
-      set_context
+      (`set_context context as set_context) 
       stream
       =
     match dismissables with

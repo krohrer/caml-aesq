@@ -47,10 +47,10 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s = random_stream 0 (100) in
+  let s = random_stream 0 (2000) in
   let a = make stdout in
     dump_raw stdout s;
-    let fb = format ~justification:`block s in
+    let fb = format ~width:200 ~justification:`block s in
       dump stdout fb;
       print a fb;
       ()
