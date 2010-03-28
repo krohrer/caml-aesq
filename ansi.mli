@@ -69,7 +69,7 @@ val format :
   ?width:int ->
   ?justification:justification ->
   ?context:context ->
-  [< raw] stream -> [> linel] array stream
+  raw stream -> [> linel] array stream
 
 val dump_raw : out_channel -> [< raw] stream -> unit
 val dump : out_channel -> [< linel] array stream -> unit

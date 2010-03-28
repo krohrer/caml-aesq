@@ -359,9 +359,9 @@ let format
       ?(has_break=false) 
       ?(line_rev=[])
       context
-      stream 
+      stream' 
       =
-    match Lazy.force stream with
+    match Lazy.force stream' with
       | SNil ->
 	  let _, line =
 	    justify_line ~partial:true ~width ~justification ~line_rev context
@@ -370,8 +370,46 @@ let format
 	    SCons (line, sappend) 
       | SCons (x, stream) ->
 	  match x with
-	    | `fragment _ as f ->
-		collect_fragment ~rem_width ~has_break ~line_rev f context stream
+	    | `fragment frag as f ->
+		(* Collect fragment and justify line if necessary *)
+		let len = String.length frag in
+		let break_len =
+		  if has_break then
+		    len + 1
+		  else
+		    len
+		in
+		  if break_len <= rem_width then
+		    (* Fragment (and possibly break) still fit on this line *)
+		    let rem_width = rem_width - break_len in
+		    let line_rev =
+		      if has_break then
+			f :: `break :: line_rev
+		      else
+			f :: line_rev
+		    in
+		      collect_line ~rem_width ~line_rev context stream
+		  else if len > width then
+		    (* Fragment must be split anyway, may as well start on this
+		       line *)
+		    let frag_left = String.slice ~last:rem_width frag and
+			frag_right = String.slice ~first:rem_width frag
+		    in
+		    let line_rev =
+		      if has_break then
+			`fragment frag_left :: `break :: line_rev
+		      else 
+			`fragment frag_left :: line_rev
+		    in
+		    let context, line = justify_line ~width ~justification ~line_rev context in
+		    let frag_stream = lazy (SCons (`fragment frag_right, stream)) in
+		    let sappend = lazy (collect_line context frag_stream) in
+		      SCons (line, sappend)
+		  else
+		    (* Fragment fits on next line for sure *)
+		    let context, line = justify_line ~width ~justification ~line_rev context in
+		    let sappend = lazy (collect_line context stream') in
+		      SCons (line, sappend)
 	    | `break ->
 		let has_break = rem_width <> width in
 		  collect_line ~rem_width ~has_break ~line_rev context stream
@@ -388,53 +426,6 @@ let format
 		   cannot yet change it to something else.*)
 		let line_rev = x :: line_rev in
 		  collect_line ~rem_width ~has_break ~line_rev context stream
-
-  and collect_fragment
-      ?(rem_width=width)
-      ?(has_break=false)
-      ?(line_rev=[])
-      (`fragment frag as f)
-      context
-      stream
-      =
-    (* Collect fragment and justify line if necessary *)
-    let len = String.length frag in
-    let break_len =
-      if has_break then
-	len + 1
-      else
-	len
-    in
-      if break_len <= rem_width then
-	(* Fragment (and possibly break) still fit on this line *)
-	let rem_width = rem_width - break_len in
-	let line_rev =
-	  if has_break then
-	    f :: `break :: line_rev
-	  else
-	    f :: line_rev
-	in
-	  collect_line ~rem_width ~line_rev context stream
-      else if len > width then
-	(* Fragment must be split anyway, may as well start on this
-	   line *)
-	let frag_left = String.slice ~last:rem_width frag and
-	    frag_right = String.slice ~first:rem_width frag
-	in
-	let line_rev =
-	  if has_break then
-	    `fragment frag_left :: `break :: line_rev
-	  else 
-	    `fragment frag_left :: line_rev
-	in
-	let context, line = justify_line ~width ~justification ~line_rev context in
-	let sappend = lazy (collect_fragment (`fragment frag_right) context stream) in
-	  SCons (line, sappend)
-      else
-	(* Fragment fits on next line for sure *)
-	let context, line = justify_line ~width ~justification ~line_rev context in
-	let sappend = lazy (collect_fragment f context stream) in
-	  SCons (line, sappend)
   in
     (* We do not want the stream to be in the closure above.  It
      * would not be garbage collected otherwise.  *)
