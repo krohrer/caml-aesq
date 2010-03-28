@@ -4,16 +4,18 @@
 
 exception Empty
 
-type 'a t =
+type 'a cell =
   | Nil
-  | Cons of 'a * 'a t Lazy.t
+  | Cons of 'a * 'a t
+and 'a t = 'a cell Lazy.t
 
-val empty : 'a t
-val is_empty : 'a t -> bool
-
-val cons : 'a -> 'a t Lazy.t -> 'a t
-val cons2 : 'a -> 'a -> 'a t Lazy.t -> 'a t
-val lcons : 'a -> (unit -> 'a t) -> 'a t
+val cell : 'a -> 'a t -> 'a cell
+val cons : 'a -> 'a t -> 'a t
+val sing : 'a -> 'a t
 
 val hd : 'a t -> 'a
 val tl : 'a t -> 'a t
+
+val fold : ('a -> 'b -> 'a) -> 'a -> 'b t -> 'a
+val append : 'a t -> 'a t -> 'a t
+val flatten : 'a t list -> 'a t

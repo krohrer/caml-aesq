@@ -2,28 +2,56 @@
 
 exception Empty
 
-type 'a t =
+type 'a cell =
   | Nil
-  | Cons of 'a * 'a t Lazy.t
+  | Cons of 'a * 'a t
+and 'a t = 'a cell Lazy.t
 
-let empty = Nil
-let is_empty s = s = Nil
+let cell x s =
+  Cons (x, s)
 
-let cons x l =
-  Cons (x, l)
+let cons x s =
+  let cell = Cons (x, s) in
+    lazy cell
 
-let cons2 x y l =
-  Cons (x, Lazy.lazy_from_val (Cons (y, l)))
+let sing x =
+  let cell = Cons (x, lazy Nil) in
+    lazy cell
 
-let lcons x f =
-  Cons (x, Lazy.lazy_from_fun f)
-
-let hd =
-  function
+let hd s =
+  match Lazy.force s with
     | Nil -> raise Empty
-    | Cons (h,_) -> h
+    | Cons (x, _) -> x
 
-let tl =
-  function
+let tl s =
+  match Lazy.force s with
     | Nil -> raise Empty
-    | Cons (_,t) -> Lazy.force t
+    | Cons (_, s) -> s
+
+let rec fold f a s =
+  match Lazy.force s with
+    | Nil -> a
+    | Cons (x, s) -> fold f (f a x) s
+
+let rec append s sapp =
+  match Lazy.force s with
+    | Nil -> sapp
+    | Cons (x, s) ->
+	lazy (Cons (x, append s sapp))
+
+let flatten slist =
+  let rec fold s srest =
+    match Lazy.force s with
+      | Nil ->
+	  begin match srest with
+	    | [] ->
+		Nil
+	    | s::srest ->
+		fold s srest
+	  end
+      | Cons (x, s) ->
+	  Cons (x, lazy (fold s srest))
+  in
+    match slist with
+      | [] -> lazy Nil
+      | s::srest -> lazy (fold s srest)

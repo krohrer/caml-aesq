@@ -15,15 +15,15 @@ let random_word =
     "FOO" 
   |]
 
-let random_context =
+let random_attributes =
   random_element [|
-    make_context ();
-    make_context ~intensity:`bold ();
-    make_context ~underline:`single ();
-    make_context ~foreground:`blue ~background:`yellow ();
-    make_context ~background:`green ~underline:`single ();
-    make_context ~foreground:`red ~inverted:true ~intensity:`bold ();
-    make_context ~foreground:`magenta ~underline:`single ()
+    Attributes.make ();
+    Attributes.make ~intensity:`bold ();
+    Attributes.make ~underline:`single ();
+    Attributes.make ~foreground:`blue ~background:`yellow ();
+    Attributes.make ~background:`green ~underline:`single ();
+    Attributes.make ~foreground:`red ~inverted:true ~intensity:`bold ();
+    Attributes.make ~foreground:`magenta ~underline:`single ()
   |]
 
 let random_elem () =
@@ -33,24 +33,26 @@ let random_elem () =
     else if r < 990 then
       `break
     else if r < 998 then
-      `set_context (random_context ())
+      `set_attributes (random_attributes ())
     else
       `linebreak
 
 let rec random_stream i n =
   lazy begin
     if i < n then
-      SCons (random_elem (), random_stream (i + 1) n)
+      LazyStream.Cons (random_elem (), random_stream (i + 1) n)
     else
-      SNil
+      LazyStream.Nil
   end
 
 let _ = 
   Random.self_init ();
-  let s = random_stream 0 (2000) in
-  let a = make stdout in
-    dump_raw stdout s;
-    let fb = format ~width:200 ~justification:`block s in
-      dump stdout fb;
-      print a fb;
+  let s1 = random_stream 0 (1000) in
+  let s2 = random_stream 0 (1000) in
+  let fmt = make_formatter stdout in
+    (* Text.dump_raw stdout s1; *)
+    let fb = Text.format ~width:100 ~justification:`block s1 in
+    let fc = Text.format ~width:100 ~justification:`center s2 in
+      (* Text.dump stdout fb; *)
+      Text.print fmt (LazyStream.flatten [fb; fc; fb]);
       ()

@@ -9,72 +9,73 @@ type intensity = [`faint | `normal | `bold]
 type justification = [`left | `center | `right | `block ]
 type underline = [`single | `none]
 
-type context
-type ansi
-
-val make_context :
-  ?intensity:intensity ->
-  ?underline:underline ->
-  ?inverted:bool ->
-  ?foreground:color ->
-  ?background:color ->
-  unit -> context
+type attributes
+type formatter
 
 val color_to_string : color -> string
 val intensity_to_string : intensity -> string
 val justification_to_string : justification -> string
 val underline_to_string : underline -> string
-val context_to_string : context -> string
+val attributes_to_string : attributes -> string
 
-(* TODO : these should operate on ansi, not on context. Provide
-   context_* variants instead *)
-val intensity  : context -> intensity
-val underline  : context -> underline
-val inverted   : context -> bool
-val foreground : context -> color
-val background : context -> color
+val default_formatter : formatter
 
-val set_intensity  : intensity -> context -> context
-val set_underline  : underline -> context -> context
-val set_inverted   : bool -> context -> context
-val set_foreground : color -> context -> context
-val set_background : color -> context -> context
+val make_formatter : ?attributes:attributes -> out_channel -> formatter
+val formatter_flush : formatter -> unit -> unit
+val formatter_reset : formatter -> unit -> unit
 
-val make : ?context:context -> out_channel -> ansi
-val flush : ansi -> unit -> unit
-val reset : ansi -> unit -> unit
+val attributes : formatter -> attributes
+val set_attributes : formatter -> attributes -> unit
+val map_attributes : formatter -> (attributes -> attributes) -> unit
 
-val context : ansi -> context
-val set_context : ansi -> context -> unit
-val map_context : ansi -> (context -> context) -> unit
+val print_space : formatter -> int -> unit
+val print_string : formatter -> string -> unit
+val print_newline : formatter -> unit -> unit
+val printf : formatter -> ('a,unit,string,unit) format4 -> 'a
 
-val print_space : ansi -> int -> unit
-val print_string : ansi -> string -> unit
-val print_newline : ansi -> unit -> unit
-val printf : ansi -> ('a,unit,string,unit) format4 -> 'a
+(** {6 Attributes} *)
+module Attributes :
+sig
+  type t = attributes
 
-(** {6 High-level ANSI printing } *)
-type 'a cell =
-  | SNil
-  | SCons of 'a * 'a stream
-and 'a stream = 'a cell Lazy.t
+  val make :
+    ?intensity:intensity ->
+    ?underline:underline ->
+    ?inverted:bool ->
+    ?foreground:color ->
+    ?background:color ->
+    unit -> t
 
-type printable = [ `fragment of string | `space of int ]
-type non_printable = [ `break | `linebreak | `set_context of context ]
+  val intensity  : t -> intensity
+  val underline  : t -> underline
+  val inverted   : t -> bool
+  val foreground : t -> color
+  val background : t -> color
 
-type raw = [ `fragment of string | `break | `linebreak | `set_context of context ]
-type linel = [ `fragment of string | `space of int | `set_context of context]
+  val set_intensity  : intensity -> t -> t
+  val set_underline  : underline -> t -> t
+  val set_inverted   : bool -> t -> t
+  val set_foreground : color -> t -> t
+  val set_background : color -> t -> t
+end
 
-val append : 'a stream -> 'a stream -> 'a stream
-val flatten : 'a stream list -> 'a stream
+(** {6 High-level streams and printing} *)
+module Text :
+sig
+  type printable = [ `fragment of string | `space of int ]
+  type non_printable = [ `break | `linebreak | `set_attributes of attributes ]
 
-val format :
-  ?width:int ->
-  ?justification:justification ->
-  ?context:context ->
-  raw stream -> [> linel] array stream
+  type raw = [ `fragment of string | `break | `linebreak | `set_attributes of attributes ]
+  type linel = [ `fragment of string | `space of int | `set_attributes of attributes]
 
-val dump_raw : out_channel -> [< raw] stream -> unit
-val dump : out_channel -> [< linel] array stream -> unit
+  val format :
+    ?width:int ->
+    ?justification:justification ->
+    ?attributes:attributes ->
+    raw LazyStream.t -> [> linel] array LazyStream.t
 
-val print : ansi -> [< linel] array stream -> unit
+  val dump_raw : out_channel -> [< raw] LazyStream.t -> unit
+  val dump : out_channel -> [< linel] array LazyStream.t -> unit
+
+  val print : formatter -> [< linel] array LazyStream.t -> unit
+end
