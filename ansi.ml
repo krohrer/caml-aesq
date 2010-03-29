@@ -1,10 +1,11 @@
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
-type intensity = [`faint | `normal | `bold]
-type justification = [`left | `center | `right | `block ]
-type underline = [`single | `none]
+type intensity = [ `faint | `normal | `bold ]
+type justification = [ `none | `left | `center | `right | `block ]
+type underline = [ `single | `none ]
 
 let justification_to_string =
   function
+    | `none -> "none"
     | `left -> "left"
     | `center -> "center"
     | `right -> "right"
@@ -106,7 +107,8 @@ let make_formatter ?attributes outc =
       p_attributes = attributes;
     }
 
-let default_formatter = make_formatter stdout
+let default_attributes = Attributes.make ()
+let std_formatter = make_formatter stdout
 
 let attributes p =
   p.p_attributes
@@ -228,125 +230,69 @@ let printf p fmt =
   enforce_attributes p ();
   Printf.ksprintf (print_string p) fmt
 
-let formatter_flush p () =
+let flush p () =
+  set_attributes p (Attributes.make ());
   enforce_attributes p ();
   Pervasives.flush p.p_outc
-
-let formatter_reset p () = 
-  set_attributes p (Attributes.make ())
 
 (*----------------------------------------------------------------------------*)
 
 module Text =
 struct
   open ExtLib
-  open LazyStream
 
   type printable = [ `fragment of string | `space of int ]
-  type non_printable = [ `break | `linebreak | `set_attributes of attributes ]
+  type non_printable = [ `break | `linebreak | `attributes of attributes ]
 
-  type raw = [ `fragment of string | `break | `linebreak | `set_attributes of attributes ]
-  type linel = [ `fragment of string | `space of int | `set_attributes of attributes]
 
-  (* Length of line as sum of length of all printable elements  *)
-  let line_length line =
-    let sum a =
+  type raw     = [ `fragment of string | `break | `linebreak | `attributes of attributes ]
+  type chopped = [ `fragment of string | `break              | `attributes of attributes ]
+  type cooked  = [ `fragment of string | `space of int       | `attributes of attributes ]
+
+  type width = int
+  type line = cooked array * width
+
+  let calc_line_width elements =
+    let aux sum =
       function
-	| `fragment f -> a + String.length f
-	| `space n -> a + n
-	| `set_attributes _ -> a
+	| `fragment f -> sum + String.length f
+	| `space n -> sum + n
+	| _ -> sum
     in
-      Array.fold_left sum 0 line
+      Array.fold_left aux 0 elements
 
-  (* Fill the line-array backwards *)
-  let rec fill_line ~line ~break_space ~break_count ?(a=break_space) ~last =
-    function
-      | [] -> ()
-      | `break::rest ->
-	  (* Bresenham stepping for greater accuracy! *)
-	  let a = a mod break_count + break_space in
-	    line.(last) <- `space (a / break_count);
-	    let last = last - 1 in
-	      fill_line ~line ~break_space ~break_count ~a ~last rest
-      | (`fragment _ as x)::rest
-      | (`set_attributes _ as x)::rest ->
-	  line.(last) <- x;
-	  let last = last - 1 in
-	    fill_line ~line ~break_space ~break_count ~a ~last rest
+  let empty_line =
+    ([||], 0)
 
-  (* Measure line and possibly find last active attributes (for next line) *)
-  let rec measure_line ?(count=0) ?(break_count=0) ?(length=0) =
-    function
-      | [] -> count, break_count, length
-      | x::rest ->
-	  let count = count + 1 in
-	    match x with
-	      | `fragment f ->
-		  let length = length + String.length f in
-		    measure_line ~count ~break_count ~length rest
-	      | `break ->
-		  let break_count = break_count + 1 in
-		    measure_line ~count ~break_count ~length rest
-	      | `set_attributes _ ->
-		  measure_line ~count ~break_count ~length rest
+  let make_line elements =
+    (elements, calc_line_width elements)
 
-  (* Return an array of justified line elements *)
-  let justify_line ?(partial=false) ~width ~justification line_rev =
-    let count, break_count, length = measure_line line_rev in
-    let justification =
-      match justification with
-	| `block -> if partial || break_count = 0 then `left else `block
-	| j -> j
-    in
-      match justification with
-	| `left ->
-	    (* Add left-over space on the right side *)
-	    let space = width - length - break_count in
-	    let break_space = break_count in
-	    let line = Array.make (count + 1) (`space space) in
-	      fill_line ~line ~break_space ~break_count ~last:(count-1) line_rev;
-	      (* line.(count) <- `space space; *)
-	      line
-	| `center ->
-	    (* Add a bit of left-over space on both sides *)
-	    let space = width - length - break_count in
-	    let break_space = break_count in
-	    let left_space = space / 2 in
-	    let right_space = space - left_space in
-	    let line = Array.make (count + 2) (`space left_space) in
-	      (* line.(0) <- `space left_space; *)
-	      fill_line ~line ~break_space ~break_count ~last:count line_rev;
-	      line.(count + 1) <- `space right_space;
-	      line
-	| `right ->
-	    (* Add left-over space on the left side *)
-	    let space = width - length - break_count in
-	    let break_space = break_count in
-	    let line = Array.make (count + 1) (`space space) in
-	      (* line.(0) <- `space space; *)
-	      fill_line ~line ~break_space ~break_count ~last:count line_rev;
-	      line
-	| `block ->
-	    (* Distribute *)
-	    assert (break_count > 0);
-	    let break_space = width - length in
-	    let line = Array.make count (`space 0) in
-	      fill_line ~line ~break_space ~break_count ~last:(count-1) line_rev;
-	      line
+  let line_width (_,width) = width
 
-  let format_min_width = 1 (* Minimum width allowed for formatting *)
+  let line_concat lines =
+    let elements_array, widths = List.split lines in
+    let elements = Array.concat elements_array in
+    let width = List.fold_left (+) 0 widths in
+      (elements, width)
 
-  let format' ?(width=78) ?(justification=`left) =
-    (* Width and justification can be part of a closure, so we
-       dont have to pass them along as parameters *)
-    
-    (* Collect line elements for justification *)
-    let rec collect_line
+  let min_width = 1 (* Minimum width allowed for formatting *)
+
+  (* Chop text up into lines (lines still need to be cooked tough) *)
+  let rec chop attributes width stream =
+    let width = max min_width width in
+      chop' width attributes stream
+
+  (* Closures are a poor mans objects, and [width] is the only
+     constant field. Stream is not part of it, because it would
+     prevent the stream cells from getting gc'd. *)
+  and chop' width =
+    (* Chop text so its lines are no longer than [width] *)
+    let rec chop_line
 	~attributes
 	(* Current attributes *)
 	?(rem_width=width)
 	(* Remaining width *)
-	?(line_rev=[`set_attributes attributes])
+	?(line_rev=[`attributes attributes])
 	(* Reverse list of line elements, start each line explicitly
 	   with the current attributes. Makes it easier to concat lines
 	   later on. *)
@@ -357,64 +303,62 @@ struct
 	stream
 	=
       match Lazy.force stream with
-	| Nil ->
+	| LazyStream.Nil ->
 	    (* Done *)
-	    collect_done
+	    chop_done
 	      ~attributes
 	      ~line_rev
 	      ~dismissables
 	      ()
-	| Cons (x, stream) ->
+	| LazyStream.Cons (x, stream) ->
 	    (* Dispatch *)
 	    begin match x with
-	      | `fragment _ as fragment ->
-		  collect_fragment
+	      | `fragment _ as x ->
+		  chop_fragment
 		    ~attributes
 		    ~rem_width
 		    ~line_rev
 		    ~dismissables
-		    fragment
+		    x
 		    stream
 	      | `break ->
-		  collect_break
+		  chop_break
 		    ~attributes
 		    ~rem_width
 		    ~line_rev
 		    ~dismissables
 		    stream
 	      | `linebreak ->
-		  collect_linebreak
+		  chop_linebreak
 		    ~attributes
 		    ~line_rev
 		    stream
-	      | `set_attributes _ as set_attributes ->
-		  collect_set_attributes
+	      | `attributes _ as x ->
+		  chop_set_attributes
 		    ~attributes
 		    ~rem_width
 		    ~line_rev
 		    ~dismissables
-		    set_attributes
+		    x
 		    stream
 	    end
 	      
-    (* Justify last line, if there are any printables. *)
-    and collect_done
+    (* Make partial line from the remaining elements *)
+    and chop_done
 	~attributes
 	~line_rev
 	~dismissables
 	()
 	=
       let line =
-	justify_line
+	make_chopped
 	  ~partial:true
-	  ~width
-	  ~justification
 	  (Option.default line_rev dismissables)
       in
-	Cons (line, lazy Nil)
+	LazyStream.Cons (line, lazy LazyStream.Nil)
 
-    (* Collect fragment and justify line if necessary *)
-    and collect_fragment
+    (* Chop fragment and justify line if necessary *)
+    and chop_fragment
 	~attributes
 	~rem_width
 	~line_rev
@@ -425,52 +369,47 @@ struct
       let len = String.length frag in
 	if len <= rem_width then
 	  (* Fragment still fits on this line *)
-	  collect_line
+	  chop_line
 	    ~attributes
 	    ~rem_width:(rem_width - len)
 	    ~line_rev:(fragment :: Option.default line_rev dismissables)
 	    stream
-	else if len > width && rem_width >= format_min_width then
+	else if len > width && rem_width >= min_width then
 	  (* Fragment must be split anyway, may as well start on this
 	     line, if possible. It must always be possible if the line
 	     does not yet contain any printable elements. *)
 	  let line =
 	    let frag_left = String.slice ~last:rem_width frag in
-	      justify_line
-		~width
-		~justification
+	      make_chopped
 		(`fragment frag_left :: Option.default line_rev dismissables)
 	  and cell =
 	    let frag_right = String.slice ~first:rem_width frag in
 	      (* Prefix stream for next line with left-overs
 		 from current line *)
-	      Cons (`fragment frag_right,
-		    stream)
+	      LazyStream.Cons (`fragment frag_right,
+			       stream)
 	  in
-	    Cons (line,
-		  lazy (collect_line
-			  ~attributes
-			  (lazy cell)))
+	    LazyStream.Cons (line,
+			     lazy (chop_line
+				     ~attributes
+				     (lazy cell)))
 	else
 	  (* Fragment does not fit on current line, retry on
 	     next line. *)
 	  let line =
-	    justify_line
-	      ~width
-	      ~justification
-	      line_rev
+	    make_chopped line_rev
 	  and cell =
 	    (* This exact cell already exists, but we dont want to
 	       pass it as an argument since it only gets used in this
 	       case. So we simply construct it anew. (Thank science we
 	       have immutable streams!) *)
-	    Cons (fragment, stream)
+	    LazyStream.Cons (fragment, stream)
 	  in
-	    Cons (line,
-		  lazy (collect_line ~attributes (lazy cell)))
+	    LazyStream.Cons (line,
+			     lazy (chop_line ~attributes (lazy cell)))
 
     (* Break: Ignore at the beginning of the line, or add it to dismissables. *)
-    and collect_break
+    and chop_break
 	~attributes
 	~rem_width
 	~line_rev
@@ -480,7 +419,7 @@ struct
       if width = rem_width then
 	(* Simply ignore break at the beginning of the
 	   line *)
-	collect_line
+	chop_line
 	  ~attributes
 	  ~rem_width
 	  ~line_rev
@@ -495,7 +434,7 @@ struct
 		let dismissables =
 		  `break :: Option.default line_rev dismissables
 		in
-		  collect_line
+		  chop_line
 		    ~attributes
 		    ~rem_width:(rem_width - 1)
 		    ~line_rev
@@ -503,16 +442,13 @@ struct
 		    stream
 	      else
 		let line =
-		  justify_line
-		    ~width
-		    ~justification
-		    line_rev
+		  make_chopped line_rev
 		in
-		  Cons (line,
-			lazy (collect_line attributes stream))
+		  LazyStream.Cons (line,
+				   lazy (chop_line attributes stream))
 	  | Some _ ->
 	      (* Already has dismissable break, ignore *)
-	      collect_line
+	      chop_line
 		~attributes
 		~rem_width
 		~line_rev
@@ -522,62 +458,157 @@ struct
 
     (* Linebreak: justify line without loose breaks and
        continue with next line *)
-    and collect_linebreak
+    and chop_linebreak
 	~attributes
 	~line_rev
 	stream
 	=
       let line = 
-	justify_line
-	  ~partial:true
-	  ~width
-	  ~justification
-	  line_rev
+	make_chopped ~partial:true line_rev
       in
-	Cons (line,
-	      lazy (collect_line attributes stream))
+	LazyStream.Cons (line,
+			 lazy (chop_line attributes stream))
 
     (* Set attributes: Update current attributes and add it to the other elements *)
-    and collect_set_attributes
+    and chop_set_attributes
 	~attributes
 	~rem_width
 	~line_rev
 	~dismissables
-	(`set_attributes attributes as set_attributes) 
+	(`attributes attributes as x)
 	stream
 	=
       match dismissables with
 	| None ->
 	    (* Simply add to current line if we have no
 	       loose breaks *)
-	    collect_line
+	    chop_line
 	      ~attributes
 	      ~rem_width
-	      ~line_rev:(set_attributes :: line_rev)
+	      ~line_rev:(x :: line_rev)
 	      stream
 	| Some breaks ->
 	    (* We have one or more loose breaks after a
 	       fragment, so we add it to that list. *)
-	    collect_line
+	    chop_line
 	      ~attributes
 	      ~rem_width
 	      ~line_rev
-	      ~dismissables:(set_attributes :: breaks)
+	      ~dismissables:(x :: breaks)
 	      stream
-    in
-      collect_line
 
-  (* We do not want the stream to be in the closure above.  Otherwise,
-     its cells would not be garbage collected until the stream was
-     consumed entirely. *)
+    (* Make a chopped line *)
+    and make_chopped
+	?(partial=false)
+	line_rev
+	=
+      let line = Array.of_list line_rev in
+	Array.rev_in_place line;
+	line, partial
+    in
+      fun attributes stream -> lazy (chop_line ~attributes stream)
+
+  (*------------------------------------*)
+	
+  (* Convert break to space of width 1, leave the rest as is *)
+  let break_to_space =
+    function
+      | `fragment _ | `attributes _ as x -> x
+      | `break -> `space 1
+
+  (* Convert breaks to spaces by distributing [break_space] evenly
+     among all spaces. Because widths are integers, we use something
+     similar to the Bresenham line-drawing algorithm *)
+  let break_to_space' ~break_space ~break_count () =
+    let a = ref break_space in
+      function
+	| `fragment _ | `attributes _ as x -> x
+	| `break ->
+	    let x = `space (!a / break_count) in
+	      a := !a mod break_count + break_space;
+	      x
+      
+  (* Measure total width of all printable elements *)
+  let measure_fragments elements =
+    let aux sum =
+      function
+	| `fragment f -> sum + String.length f
+	| _ -> sum
+    in
+      Array.fold_left aux 0 elements
+
+  (* Count number of breaks *)
+  let count_breaks elements =
+    let aux sum =
+      function
+	| `break -> sum + 1
+	| _ -> sum
+    in
+      Array.fold_left aux 0 elements
+
+  (* Return an array of justified line elements *)
+  let justify_line width justification (elements, partial) =
+    let break_count = count_breaks elements in
+    let fragment_width = measure_fragments elements in
+    let justification =
+      match justification with
+	| `block -> if partial || break_count = 0 then `left else `block
+	| j -> j
+    in
+      match justification with
+	| `none ->
+	    (* Simply convert breaks to spaces, ignore desired width *)
+	    (Array.map break_to_space elements, fragment_width + break_count)
+	| `left ->
+	    (* Add left-over space on the right side *)
+	    let space = max 0 (width - fragment_width - break_count) in
+	    let count = Array.length elements + 1 in
+	    let line = Array.make count (`space space) in
+	    let aux i x = line.(i) <- break_to_space x in
+	      Array.iteri aux elements;
+	      (line, width)
+	| `center ->
+	    (* Add a bit of left-over space on both sides *)
+	    let space = max 0 (width - fragment_width - break_count) in
+	    let left_space = space / 2 in
+	    let right_space = space - left_space in
+	    let count = Array.length elements + 2 in
+	    let line = Array.make count (`space left_space) in
+	    let aux i x = line.(i+1) <- break_to_space x in
+	      (* line.(0) <- `space left_space; *)
+	      Array.iteri aux elements;
+	      line.(count-1) <- `space right_space;
+	      (line, width)
+	| `right ->
+	    (* Add left-over space on the left side *)
+	    let space = max 0 (width - fragment_width - break_count) in
+	    let count = Array.length elements + 1 in
+	    let line = Array.make count (`space space) in
+	    let aux i x = line.(i+1) <- break_to_space x in
+	      (* line.(0) <- `space space; *)
+	      Array.iteri aux elements;
+	      (line, width)
+	| `block ->
+	    (* Distribute *)
+	    assert (break_count > 0);
+	    let break_space = width - fragment_width in
+	    let aux = break_to_space' ~break_space ~break_count () in
+	    let line = Array.map aux elements in
+	      (line, width)
+
   let format
+      ?(attributes=default_attributes)
       ?(width=78)
-      ?(justification=`left)
-      ?(attributes=Attributes.make ())
+      ?(justification=`none)
       stream
       =
-    let width = max format_min_width width in
-      lazy (format' ~width ~justification ~attributes stream)
+    let chopped_stream = chop attributes width stream in
+      LazyStream.map (justify_line width justification) chopped_stream
+
+  (*----------------------------------------------------------------------------*)
+
+  let tabulate ?(separator=empty_line) tabs =
+    lazy LazyStream.Nil
 
   (*----------------------------------------------------------------------------*)
 
@@ -585,10 +616,10 @@ struct
 
   let rec dump_raw outc stream =
     match Lazy.force stream with
-      | Nil ->
+      | LazyStream.Nil ->
 	  fprintf outc "\n";
 	  Pervasives.flush outc
-      | Cons (x, stream) ->
+      | LazyStream.Cons (x, stream) ->
 	  begin match x with
 	    | `fragment f ->
 		fprintf outc "%S " f
@@ -596,24 +627,24 @@ struct
 		fprintf outc "BR "
 	    | `linebreak -> 
 		fprintf outc "LBR\n"
-	    | `set_attributes c ->
+	    | `attributes c ->
 		fprintf outc "ATTRS(%s) " (attributes_to_string c)
 	  end;
 	  dump_raw outc stream
 
   let rec dump outc stream =
     match Lazy.force stream with
-      | Nil ->
+      | LazyStream.Nil ->
 	  fprintf outc "\n";
 	  Pervasives.flush outc
-      | Cons (x, stream) ->
+      | LazyStream.Cons ((x,_), stream) ->
 	  Array.iter
 	    (function
 	       | `fragment f ->
 		   fprintf outc "%S " f
 	       | `space n ->
 		   fprintf outc "SP(%d) " n
-	       | `set_attributes c ->
+	       | `attributes c ->
 		   fprintf outc "ATTRS(%s) " (attributes_to_string c))
 	    x;
 	  fprintf outc "\n";
@@ -621,17 +652,16 @@ struct
 
   let rec print ansi stream =
     match Lazy.force stream with
-      | Nil ->
-	  formatter_reset ansi ();
-	  formatter_flush ansi ()
-      | Cons (x, stream) ->
+      | LazyStream.Nil ->
+	  flush ansi ()
+      | LazyStream.Cons ((x,_), stream) ->
 	  Array.iter
 	    (function
 	       | `fragment f ->
 		   print_string ansi f
 	       | `space n ->
 		   print_space ansi n
-	       | `set_attributes c ->
+	       | `attributes c ->
 		   set_attributes ansi c)
 	    x;
 	  print_newline ansi ();

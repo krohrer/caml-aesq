@@ -33,7 +33,7 @@ let random_elem () =
     else if r < 990 then
       `break
     else if r < 998 then
-      `set_attributes (random_attributes ())
+      `attributes (random_attributes ())
     else
       `linebreak
 
@@ -47,12 +47,12 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s1 = random_stream 0 (1000) in
-  let s2 = random_stream 0 (1000) in
-  let fmt = make_formatter stdout in
+  let s1 = random_stream 0 (1000*1000) in
+  (* let s2 = random_stream 0 (1000) in *)
     (* Text.dump_raw stdout s1; *)
-    let fb = Text.format ~width:100 ~justification:`block s1 in
-    let fc = Text.format ~width:100 ~justification:`center s2 in
-      (* Text.dump stdout fb; *)
-      Text.print fmt (LazyStream.flatten [fb; fc; fb]);
-      ()
+    (* let fb = Text.format ~width:100 ~justification:`block s1 in *)
+    (* let fc = Text.format ~width:100 ~justification:`center s2 in *)
+    (*   (\* Text.dump stdout fb; *\) *)
+    (*   Text.print fmt (LazyStream.flatten [fb; fc; fb]); *)
+    Text.print std_formatter (Text.format ~justification:`block s1);
+    ()

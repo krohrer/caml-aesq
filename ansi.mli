@@ -6,7 +6,7 @@
 
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
-type justification = [`left | `center | `right | `block ]
+type justification = [`left | `center | `right | `block | `none]
 type underline = [`single | `none]
 
 type attributes
@@ -18,11 +18,10 @@ val justification_to_string : justification -> string
 val underline_to_string : underline -> string
 val attributes_to_string : attributes -> string
 
-val default_formatter : formatter
+val default_attributes : attributes
+val std_formatter : formatter
 
 val make_formatter : ?attributes:attributes -> out_channel -> formatter
-val formatter_flush : formatter -> unit -> unit
-val formatter_reset : formatter -> unit -> unit
 
 val attributes : formatter -> attributes
 val set_attributes : formatter -> attributes -> unit
@@ -32,6 +31,8 @@ val print_space : formatter -> int -> unit
 val print_string : formatter -> string -> unit
 val print_newline : formatter -> unit -> unit
 val printf : formatter -> ('a,unit,string,unit) format4 -> 'a
+
+val flush : formatter -> unit -> unit
 
 (** {6 Attributes} *)
 module Attributes :
@@ -63,17 +64,28 @@ end
 module Text :
 sig
   type printable = [ `fragment of string | `space of int ]
-  type non_printable = [ `break | `linebreak | `set_attributes of attributes ]
+  type non_printable = [ `break | `linebreak | `attributes of attributes ]
 
-  type raw = [ `fragment of string | `break | `linebreak | `set_attributes of attributes ]
-  type linel = [ `fragment of string | `space of int | `set_attributes of attributes]
+  type raw     = [ `fragment of string | `break | `linebreak | `attributes of attributes ]
+  type chopped = [ `fragment of string | `break              | `attributes of attributes ]
+  type cooked  = [ `fragment of string | `space of int       | `attributes of attributes ]
+
+  type width = int
+  type line
+
+  val empty_line : line
+  val make_line : cooked array -> line
+  val line_width : line -> width
+  val line_concat : line list -> line
 
   val format :
-    ?width:int -> ?justification:justification -> ?attributes:attributes ->
-    raw LazyStream.t -> [> linel] array LazyStream.t
+    ?attributes:attributes -> ?width:width -> ?justification:justification ->
+    raw LazyStream.t -> line LazyStream.t
 
-  val dump_raw : out_channel -> [< raw] LazyStream.t -> unit
-  val dump : out_channel -> [< linel] array LazyStream.t -> unit
+  val tabulate : ?separator:line -> line LazyStream.t list -> line LazyStream.t
 
-  val print : formatter -> [< linel] array LazyStream.t -> unit
+  val dump_raw : out_channel -> raw LazyStream.t -> unit
+
+  val dump : out_channel -> line LazyStream.t -> unit
+  val print : formatter -> line LazyStream.t -> unit
 end

@@ -21,3 +21,7 @@ val fold : ('a -> 'b -> 'a) -> 'a -> 'b t -> 'a
 
 val append : 'a t -> 'a t -> 'a t
 val flatten : 'a t list -> 'a t
+
+val length : 'a t -> int
+val take : int -> 'a t -> 'a t
+val drop : int -> 'a t -> 'a t
