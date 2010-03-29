@@ -16,6 +16,8 @@ val sing : 'a -> 'a t
 val hd : 'a t -> 'a
 val tl : 'a t -> 'a t
 
+val map : ('a -> 'b) -> 'a t -> 'b t
 val fold : ('a -> 'b -> 'a) -> 'a -> 'b t -> 'a
+
 val append : 'a t -> 'a t -> 'a t
 val flatten : 'a t list -> 'a t

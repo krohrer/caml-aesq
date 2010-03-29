@@ -69,9 +69,7 @@ sig
   type linel = [ `fragment of string | `space of int | `set_attributes of attributes]
 
   val format :
-    ?width:int ->
-    ?justification:justification ->
-    ?attributes:attributes ->
+    ?width:int -> ?justification:justification -> ?attributes:attributes ->
     raw LazyStream.t -> [> linel] array LazyStream.t
 
   val dump_raw : out_channel -> [< raw] LazyStream.t -> unit

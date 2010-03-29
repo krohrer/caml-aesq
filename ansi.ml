@@ -248,6 +248,16 @@ struct
   type raw = [ `fragment of string | `break | `linebreak | `set_attributes of attributes ]
   type linel = [ `fragment of string | `space of int | `set_attributes of attributes]
 
+  (* Length of line as sum of length of all printable elements  *)
+  let line_length line =
+    let sum a =
+      function
+	| `fragment f -> a + String.length f
+	| `space n -> a + n
+	| `set_attributes _ -> a
+    in
+      Array.fold_left sum 0 line
+
   (* Fill the line-array backwards *)
   let rec fill_line ~line ~break_space ~break_count ?(a=break_space) ~last =
     function

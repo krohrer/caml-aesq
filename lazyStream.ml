@@ -28,6 +28,11 @@ let tl s =
     | Nil -> raise Empty
     | Cons (_, s) -> s
 
+let rec map f s =
+  match Lazy.force s with
+    | Nil -> lazy Nil
+    | Cons (x, s) -> lazy (Cons (f x, map f s))
+
 let rec fold f a s =
   match Lazy.force s with
     | Nil -> a
