@@ -92,7 +92,7 @@ sig
     raw LazyStream.t -> line LazyStream.t
 
   val tabulate :
-    ?separator:line -> ?widths:width list ->
+    ?separator:cooked -> widths:width list ->
     line LazyStream.t list -> line LazyStream.t
 
   val dump_raw : out_channel -> raw LazyStream.t -> unit

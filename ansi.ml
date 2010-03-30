@@ -295,12 +295,12 @@ struct
   (* Chop text up into lines (lines still need to be cooked tough) *)
   let rec chop attributes width stream =
     let width = max min_width width in
-      chop' width attributes stream
+      chop_aux width attributes stream
 
   (* Closures are a poor mans objects, and [width] is the only
      constant field. Stream is not part of it, because it would
      prevent the stream cells from getting gc'd. *)
-  and chop' width =
+  and chop_aux width =
     (* Chop text so its lines are no longer than [width] *)
     let rec chop_line
 	~attributes
@@ -630,14 +630,40 @@ struct
   let make_tab width stream =
     (stream, width)
 
-  let rec tabulate ?(separator=empty_line) ?widths streams =
+  let rec tabulate ?(separator=`space 1) ~widths streams =
     (* Use mutable state to generate the data for a lazy
        stream. This works because the function is only called
        once for each cons cell and the order of invocations is
        implicitly given by the definition of lazy-streams. *)
-    (* IDEA: Could this technique be used for formatting as well?
-       Maybe, but I don't see that much of an advantage *)
-    LazyStream.nil
+    tabulate_aux ~separator (Array.of_list widths) (Array.of_list streams)
+  
+  and tabulate_aux ~separator widths streams =
+    let count = Array.length streams in
+    let exhausted = ref false in
+    let rec gen () =
+      exhausted := true;
+      let elems = Array.make (3 * count - 1) (`space 0) in
+	for i = 0 to count - 1 do
+	  let k = 3*i in
+	    if i > 0 then
+	      elems.(k) <- separator;
+	    match Lazy.force streams.(i) with
+              | LazyStream.Nil ->
+                  elems.(k + 1) <- `attributes default_attributes;
+                  elems.(k + 2) <- `space widths.(i);
+	      | LazyStream.Cons ((elements,width), s) ->
+		  exhausted := false;
+		  streams.(i) <- s;
+		  elems.(k + 1) <- `seq elements;
+		  elems.(k + 2) <- `space (max 0 (widths.(i) - width))
+	done;
+	if !exhausted then
+	  LazyStream.Nil
+	else
+	  LazyStream.Cons (make_line elems,
+			  Lazy.lazy_from_fun gen)
+    in
+      Lazy.lazy_from_fun gen
 
 (*----------------------------------------------------------------------------*)
 
