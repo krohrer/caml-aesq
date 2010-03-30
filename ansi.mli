@@ -64,14 +64,23 @@ end
 module Text :
 sig
   type printable = [ `fragment of string | `space of int ]
-  type non_printable = [ `break | `linebreak | `attributes of attributes ]
-
-  type raw     = [ `fragment of string | `break | `linebreak | `attributes of attributes ]
-  type chopped = [ `fragment of string | `break              | `attributes of attributes ]
-  type cooked  = [ `fragment of string | `space of int       | `attributes of attributes ]
 
   type width = int
   type line
+
+  type raw =
+      [ `fragment of string
+      | `attributes of attributes
+      | `break
+      | `linebreak
+      ]
+
+  type cooked =
+      [ `fragment of string
+      | `attributes of attributes
+      | `space of int
+      | `seq of cooked array
+      ]
 
   val empty_line : line
   val make_line : cooked array -> line
@@ -82,7 +91,9 @@ sig
     ?attributes:attributes -> ?width:width -> ?justification:justification ->
     raw LazyStream.t -> line LazyStream.t
 
-  val tabulate : ?separator:line -> line LazyStream.t list -> line LazyStream.t
+  val tabulate :
+    ?separator:line -> ?widths:width list ->
+    line LazyStream.t list -> line LazyStream.t
 
   val dump_raw : out_channel -> raw LazyStream.t -> unit
 

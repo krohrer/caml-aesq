@@ -242,22 +242,37 @@ struct
   open ExtLib
 
   type printable = [ `fragment of string | `space of int ]
-  type non_printable = [ `break | `linebreak | `attributes of attributes ]
 
+  type raw =
+      [ `fragment of string
+      | `attributes of attributes
+      | `break
+      | `linebreak
+      ]
 
-  type raw     = [ `fragment of string | `break | `linebreak | `attributes of attributes ]
-  type chopped = [ `fragment of string | `break              | `attributes of attributes ]
-  type cooked  = [ `fragment of string | `space of int       | `attributes of attributes ]
+  type chopped =
+      [ `fragment of string
+      | `attributes of attributes
+      | `break
+      ]
+
+  type cooked =
+      [ `fragment of string
+      | `attributes of attributes
+      | `space of int
+      | `seq of cooked array
+      ]
 
   type width = int
   type line = cooked array * width
 
-  let calc_line_width elements =
+  let rec measure_line_width elements =
     let aux sum =
       function
 	| `fragment f -> sum + String.length f
 	| `space n -> sum + n
-	| _ -> sum
+	| `seq elements -> sum + measure_line_width elements
+	| `attributes _ -> sum
     in
       Array.fold_left aux 0 elements
 
@@ -265,7 +280,7 @@ struct
     ([||], 0)
 
   let make_line elements =
-    (elements, calc_line_width elements)
+    (elements, measure_line_width elements)
 
   let line_width (_,width) = width
 
@@ -355,7 +370,7 @@ struct
 	  ~partial:true
 	  (Option.default line_rev dismissables)
       in
-	LazyStream.Cons (line, lazy LazyStream.Nil)
+	LazyStream.Cons (line, LazyStream.nil)
 
     (* Chop fragment and justify line if necessary *)
     and chop_fragment
@@ -403,7 +418,7 @@ struct
 	       pass it as an argument since it only gets used in this
 	       case. So we simply construct it anew. (Thank science we
 	       have immutable streams!) *)
-	    LazyStream.Cons (fragment, stream)
+	    LazyStream.Cons (fragment, stream);
 	  in
 	    LazyStream.Cons (line,
 			     lazy (chop_line ~attributes (lazy cell)))
@@ -607,10 +622,24 @@ struct
 
   (*----------------------------------------------------------------------------*)
 
-  let tabulate ?(separator=empty_line) tabs =
-    lazy LazyStream.Nil
+  type tab = line LazyStream.t * width
 
-  (*----------------------------------------------------------------------------*)
+  let empty_tab width =
+    (LazyStream.nil, width)
+
+  let make_tab width stream =
+    (stream, width)
+
+  let rec tabulate ?(separator=empty_line) ?widths streams =
+    (* Use mutable state to generate the data for a lazy
+       stream. This works because the function is only called
+       once for each cons cell and the order of invocations is
+       implicitly given by the definition of lazy-streams. *)
+    (* IDEA: Could this technique be used for formatting as well?
+       Maybe, but I don't see that much of an advantage *)
+    LazyStream.nil
+
+(*----------------------------------------------------------------------------*)
 
   open Printf
 
@@ -632,39 +661,53 @@ struct
 	  end;
 	  dump_raw outc stream
 
-  let rec dump outc stream =
-    match Lazy.force stream with
-      | LazyStream.Nil ->
-	  fprintf outc "\n";
-	  Pervasives.flush outc
-      | LazyStream.Cons ((x,_), stream) ->
-	  Array.iter
-	    (function
-	       | `fragment f ->
-		   fprintf outc "%S " f
-	       | `space n ->
-		   fprintf outc "SP(%d) " n
-	       | `attributes c ->
-		   fprintf outc "ATTRS(%s) " (attributes_to_string c))
-	    x;
-	  fprintf outc "\n";
-	  dump outc stream
+  let dump outc =
+    let rec dump_stream stream =
+      match Lazy.force stream with
+	| LazyStream.Nil ->
+	    fprintf outc "\n";
+	    Pervasives.flush outc
+	| LazyStream.Cons ((elements,_), stream) ->
+	    Array.iter dump_element elements;
+	    fprintf outc "\n";
+	    dump_stream stream
 
-  let rec print ansi stream =
-    match Lazy.force stream with
-      | LazyStream.Nil ->
-	  flush ansi ()
-      | LazyStream.Cons ((x,_), stream) ->
-	  Array.iter
-	    (function
-	       | `fragment f ->
-		   print_string ansi f
-	       | `space n ->
-		   print_space ansi n
-	       | `attributes c ->
-		   set_attributes ansi c)
-	    x;
-	  print_newline ansi ();
-	  print ansi stream
+    and dump_element =
+      function
+	| `fragment f ->
+	    fprintf outc "%S " f
+	| `space n ->
+	    fprintf outc "SP(%d) " n
+	| `attributes c ->
+	    fprintf outc "ATTRS(%s) " (attributes_to_string c)
+	| `seq elements ->
+	    fprintf outc "[[ ";
+	    Array.iter dump_element elements;
+	    fprintf outc "]] "
+    in
+      dump_stream
+
+  let print ansi =
+    let rec print_stream stream =
+      match Lazy.force stream with
+	| LazyStream.Nil ->
+	    flush ansi ()
+	| LazyStream.Cons ((elements,_), stream) ->
+	    Array.iter print_element elements;
+	    print_newline ansi ();
+	    print_stream stream
+
+    and print_element =
+      function
+	| `fragment f ->
+	    print_string ansi f
+	| `space n ->
+	    print_space ansi n
+	| `attributes c ->
+	    set_attributes ansi c
+	| `seq elements ->
+	    Array.iter print_element elements
+    in
+      print_stream
 
 end
