@@ -10,6 +10,7 @@ type 'a cell =
 and 'a t = 'a cell Lazy.t
 
 val cell : 'a -> 'a t -> 'a cell
+val nil : 'a t
 val cons : 'a -> 'a t -> 'a t
 val sing : 'a -> 'a t
 
@@ -25,3 +26,6 @@ val flatten : 'a t list -> 'a t
 val length : 'a t -> int
 val take : int -> 'a t -> 'a t
 val drop : int -> 'a t -> 'a t
+
+val is_nil : 'a t -> bool
+val is_cons : 'a t -> bool

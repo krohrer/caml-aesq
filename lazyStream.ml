@@ -10,6 +10,9 @@ and 'a t = 'a cell Lazy.t
 let cell x s =
   Cons (x, s)
 
+let nil =
+  lazy Nil
+
 let cons x s =
   let cell = Cons (x, s) in
     lazy cell
@@ -76,3 +79,13 @@ let rec drop n s =
 let rec length s =
   let aux sum _ = sum + 1 in
     fold aux 0 s
+
+let is_nil s =
+  match Lazy.force s with
+    | Nil -> true
+    | _ -> false
+
+let is_cons s =
+  match Lazy.force s with
+    | Cons _ -> true
+    | _ -> false
