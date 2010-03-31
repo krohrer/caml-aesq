@@ -47,12 +47,23 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s1 = random_stream 0 (1000*1000) in
-  (* let s2 = random_stream 0 (1000) in *)
+  let s1 = random_stream 0 (2000) in
+  let s2 = random_stream 0 (1000) in
+  let fill = Attributes.make ~inverted:true ~blink:true () in
+  let sep = `seq [|`attributes fill; `space 2|] in
     (* Text.dump_raw stdout s1; *)
-    (* let fb = Text.format ~width:100 ~justification:`block s1 in *)
-    (* let fc = Text.format ~width:100 ~justification:`center s2 in *)
+    let fb = Text.format ~fill ~width:80 ~just:`block s1 in
+    let fc = Text.format ~fill ~width:40 ~just:`center s2 in
+    let fr = Text.format ~fill ~width:40 ~just:`right s1 in
     (*   (\* Text.dump stdout fb; *\) *)
     (*   Text.print fmt (LazyStream.flatten [fb; fc; fb]); *)
-    Text.print std_formatter (Text.format ~justification:`block s1);
-    ()
+      ignore [fb; fc];
+      let tab =
+	Text.tabulate ~fill ~sep [
+	  80, fb;
+	  40, fc;
+	  50, fr
+	]
+      in
+	Text.print std_formatter tab;
+	()

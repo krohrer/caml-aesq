@@ -43,6 +43,7 @@ sig
     ?intensity:intensity ->
     ?underline:underline ->
     ?inverted:bool ->
+    ?blink:bool ->
     ?foreground:color ->
     ?background:color ->
     unit -> t
@@ -50,12 +51,14 @@ sig
   val intensity  : t -> intensity
   val underline  : t -> underline
   val inverted   : t -> bool
+  val blink      : t -> bool
   val foreground : t -> color
   val background : t -> color
 
   val set_intensity  : intensity -> t -> t
   val set_underline  : underline -> t -> t
   val set_inverted   : bool -> t -> t
+  val set_blink      : bool -> t -> t
   val set_foreground : color -> t -> t
   val set_background : color -> t -> t
 end
@@ -88,12 +91,17 @@ sig
   val line_concat : line list -> line
 
   val format :
-    ?attributes:attributes -> ?width:width -> ?justification:justification ->
+    ?attr:attributes ->
+    ?fill:attributes ->
+    ?width:width ->
+    ?just:justification ->
     raw LazyStream.t -> line LazyStream.t
 
   val tabulate :
-    ?separator:cooked -> widths:width list ->
-    line LazyStream.t list -> line LazyStream.t
+    ?attr:attributes ->
+    ?fill:attributes ->
+    ?sep:cooked ->
+    (width * line LazyStream.t) list -> line LazyStream.t
 
   val dump_raw : out_channel -> raw LazyStream.t -> unit
 

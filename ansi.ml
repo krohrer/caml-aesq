@@ -38,15 +38,17 @@ type attributes = {
   c_intensity : intensity;
   c_underline : underline;
   c_inverted : bool;
+  c_blink : bool;
   c_foreground : color;
   c_background : color;
 }
 
 let attributes_to_string c =
-  Printf.sprintf "{I=%s,U=%s,N=%b,F=%s,B=%s}" 
+  Printf.sprintf "{I=%s,U=%s,N=%b,B=%b,Fg=%s,Bg=%s}" 
     (intensity_to_string c.c_intensity)
     (underline_to_string c.c_underline)
     c.c_inverted
+    c.c_blink
     (color_to_string c.c_foreground)
     (color_to_string c.c_background)
 
@@ -54,6 +56,7 @@ type formatter = {
   mutable p_intensity : intensity;
   mutable p_underline : underline;
   mutable p_inverted : bool;
+  mutable p_blink : bool;
   mutable p_foreground : color;
   mutable p_background : color;
   p_outc : out_channel;
@@ -68,25 +71,29 @@ struct
       ?(intensity=`normal)
       ?(underline=`none)
       ?(inverted=false)
+      ?(blink=false)
       ?(foreground=`default)
       ?(background=`default)
       () = {
 	c_intensity = intensity;
 	c_underline = underline;
 	c_inverted = inverted;
+	c_blink = blink;
 	c_foreground = foreground;
 	c_background = background;
       }
 
-  let intensity attrs = attrs.c_intensity
-  let underline attrs = attrs.c_underline
-  let inverted attrs  = attrs.c_inverted
+  let intensity attrs  = attrs.c_intensity
+  let underline attrs  = attrs.c_underline
+  let inverted attrs   = attrs.c_inverted
+  let blink attrs      = attrs.c_blink
   let foreground attrs = attrs.c_foreground
   let background attrs = attrs.c_background
 
   let set_intensity i attrs  = { attrs with c_intensity = i }
   let set_underline u attrs  = { attrs with c_underline = u }
   let set_inverted i attrs   = { attrs with c_inverted = i }
+  let set_blink b attrs      = { attrs with c_blink = b }
   let set_foreground c attrs = { attrs with c_foreground = c }
   let set_background c attrs = { attrs with c_background = c }
 end
@@ -101,6 +108,7 @@ let make_formatter ?attributes outc =
       p_intensity = `normal;
       p_underline = `none;
       p_inverted = false;
+      p_blink = false;
       p_foreground = `default;
       p_background = `default;
       p_outc = outc;
@@ -159,6 +167,19 @@ let enforce_inverted p codes =
     end else
       codes
 
+let enforce_blink p codes =
+  let b = p.p_attributes.c_blink in
+    if b <> p.p_blink then begin
+      p.p_blink <- b;
+      let c =
+	match b with
+	  | true -> 5
+	  | false -> 25
+      in
+	c :: codes
+    end else
+      codes
+
 let color_code base c =
   let code = match c with
     | `black   -> 0
@@ -210,8 +231,9 @@ let enforce_attributes p () =
     (enforce_intensity p
        (enforce_underline p
           (enforce_inverted p
-             (enforce_background p
-		(enforce_foreground p [])))))
+	     (enforce_blink p
+		(enforce_background p
+		   (enforce_foreground p []))))))
 
 let print_space p n =
   enforce_attributes p ();
@@ -562,7 +584,7 @@ struct
       Array.fold_left aux 0 elements
 
   (* Return an array of justified line elements *)
-  let justify_line width justification (elements, partial) =
+  let justify_line fill width justification (elements, partial) =
     let break_count = count_breaks elements in
     let fragment_width = measure_fragments elements in
     let justification =
@@ -577,30 +599,35 @@ struct
 	| `left ->
 	    (* Add left-over space on the right side *)
 	    let space = max 0 (width - fragment_width - break_count) in
-	    let count = Array.length elements + 1 in
-	    let line = Array.make count (`space space) in
+	    let count = Array.length elements in
+	    let line = Array.make (count+2) (`space 0) in
 	    let aux i x = line.(i) <- break_to_space x in
 	      Array.iteri aux elements;
+	      line.(count  ) <- `attributes fill;
+	      line.(count+1) <- `space space;
 	      (line, width)
 	| `center ->
 	    (* Add a bit of left-over space on both sides *)
 	    let space = max 0 (width - fragment_width - break_count) in
 	    let left_space = space / 2 in
 	    let right_space = space - left_space in
-	    let count = Array.length elements + 2 in
-	    let line = Array.make count (`space left_space) in
-	    let aux i x = line.(i+1) <- break_to_space x in
-	      (* line.(0) <- `space left_space; *)
+	    let count = Array.length elements in
+	    let line = Array.make (count+4) (`space 0) in
+	    let aux i x = line.(i+2) <- break_to_space x in
+	      line.(0) <- `attributes fill;
+	      line.(1) <- `space left_space;
 	      Array.iteri aux elements;
-	      line.(count-1) <- `space right_space;
+	      line.(count+2) <- `attributes fill;
+	      line.(count+3) <- `space right_space;
 	      (line, width)
 	| `right ->
 	    (* Add left-over space on the left side *)
 	    let space = max 0 (width - fragment_width - break_count) in
-	    let count = Array.length elements + 1 in
-	    let line = Array.make count (`space space) in
-	    let aux i x = line.(i+1) <- break_to_space x in
-	      (* line.(0) <- `space space; *)
+	    let count = Array.length elements in
+	    let line = Array.make (count+2) (`space 0) in
+	    let aux i x = line.(i+2) <- break_to_space x in
+	      line.(0) <- `attributes fill;
+	      line.(1) <- `space space;
 	      Array.iteri aux elements;
 	      (line, width)
 	| `block ->
@@ -612,13 +639,14 @@ struct
 	      (line, width)
 
   let format
-      ?(attributes=default_attributes)
+      ?(attr=default_attributes)
+      ?(fill=default_attributes)
       ?(width=78)
-      ?(justification=`none)
+      ?(just=`none)
       stream
       =
-    let chopped_stream = chop attributes width stream in
-      LazyStream.map (justify_line width justification) chopped_stream
+    let chopped_stream = chop attr width stream in
+      LazyStream.map (justify_line fill width just) chopped_stream
 
   (*----------------------------------------------------------------------------*)
 
@@ -630,23 +658,33 @@ struct
   let make_tab width stream =
     (stream, width)
 
-  let rec tabulate ?(separator=`space 1) ~widths streams =
-    (* Use mutable state to generate the data for a lazy
-       stream. This works because the function is only called
-       once for each cons cell and the order of invocations is
-       implicitly given by the definition of lazy-streams. *)
-    tabulate_aux ~separator (Array.of_list widths) (Array.of_list streams)
-  
-  and tabulate_aux ~separator widths streams =
+  let rec tabulate
+      ?(attr=default_attributes) 
+      ?(fill=default_attributes)
+      ?(sep=`space 1)
+      tabs
+      =
+    let widths, streams = List.split tabs in
+    let sep = [|`attributes attr; sep|] in
+      tabulate_aux fill sep (Array.of_list widths) (Array.of_list streams)
+	      
+  and tabulate_aux fill sep widths streams =
+    (* Use mutable state to generate the data for a lazy stream. This
+       works because the function is only called once for each cons
+       cell and the order of invocations is implicitly given by the
+       definition of lazy-streams.
+       
+       IDEA: Could this be applied to chop as well? Probably, but I do
+       not see any immediate benefits. *)
     let count = Array.length streams in
     let exhausted = ref false in
     let rec gen () =
       exhausted := true;
-      let elems = Array.make (3 * count - 1) (`space 0) in
+      let elems = Array.make (3 * count) (`space 0) in
 	for i = 0 to count - 1 do
 	  let k = 3*i in
 	    if i > 0 then
-	      elems.(k) <- separator;
+	      elems.(k) <- `seq sep;
 	    match Lazy.force streams.(i) with
               | LazyStream.Nil ->
                   elems.(k + 1) <- `attributes default_attributes;
@@ -655,17 +693,19 @@ struct
 		  exhausted := false;
 		  streams.(i) <- s;
 		  elems.(k + 1) <- `seq elements;
-		  elems.(k + 2) <- `space (max 0 (widths.(i) - width))
+		  let fill_space = max 0 (widths.(i) - width) in
+		    if fill_space > 0 then
+		      elems.(k + 2) <- `seq [|`attributes fill; `space fill_space|]
 	done;
 	if !exhausted then
 	  LazyStream.Nil
 	else
 	  LazyStream.Cons (make_line elems,
-			  Lazy.lazy_from_fun gen)
+			   Lazy.lazy_from_fun gen)
     in
       Lazy.lazy_from_fun gen
 
-(*----------------------------------------------------------------------------*)
+  (*----------------------------------------------------------------------------*)
 
   open Printf
 
