@@ -101,14 +101,13 @@ and take_aux n (lazy c) =
 	  Nil
 
 let rec drop n s = lazy (drop_aux n s)
-and drop_aux n (lazy c) =
-  match c with
-    | Nil -> Nil
-    | Cons (_, s) ->
-	if n > 0 then
-	  drop_aux (n - 1) s
-	else
-	  Lazy.force s
+and drop_aux n s =
+  if n > 0 then
+    match Lazy.force s with
+      | Nil -> Nil
+      | Cons (_, s) -> drop_aux (n - 1) s
+  else
+    Lazy.force s
 
 let rec length s =
   let aux sum _ = sum + 1 in
