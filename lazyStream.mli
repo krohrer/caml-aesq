@@ -14,8 +14,9 @@ val nil : 'a t
 val cons : 'a -> 'a t -> 'a t
 val sing : 'a -> 'a t
 
+val generate : (unit -> 'a) -> 'a t 
+val forever : 'a -> 'a t
 val from : (unit -> 'a option) -> 'a t
-val init : int -> (int -> 'a) -> 'a t
 
 val hd : 'a t -> 'a
 val tl : 'a t -> 'a t

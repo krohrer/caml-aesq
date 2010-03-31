@@ -337,9 +337,9 @@ struct
 	(* Line elements including elements after the last printable
 	   that might be dismissed, if no printable was to
 	   follow before the end of the line. *)
-	stream
+	(lazy cell)
 	=
-      match Lazy.force stream with
+      match cell with
 	| LazyStream.Nil ->
 	    (* Done *)
 	    chop_done
@@ -704,7 +704,7 @@ struct
 
   (*----------------------------------------------------------------------------*)
 
-  let pad
+  let rec pad
       ?(fill=default_attributes)
       ?(left=1)
       ?(right=1)
@@ -712,14 +712,14 @@ struct
       ?(bottom=1)
       stream
       =
-    lazy LazyStream.Nil
+    LazyStream.nil
 
   (*----------------------------------------------------------------------------*)
 
   open Printf
 
-  let rec dump_raw outc stream =
-    match Lazy.force stream with
+  let rec dump_raw outc (lazy cell) =
+    match cell with
       | LazyStream.Nil ->
 	  fprintf outc "\n";
 	  Pervasives.flush outc
@@ -737,8 +737,8 @@ struct
 	  dump_raw outc stream
 
   let dump outc =
-    let rec dump_stream stream =
-      match Lazy.force stream with
+    let rec dump_stream (lazy cell) =
+      match cell with
 	| LazyStream.Nil ->
 	    fprintf outc "\n";
 	    Pervasives.flush outc
@@ -763,8 +763,8 @@ struct
       dump_stream
 
   let print ansi =
-    let rec print_stream stream =
-      match Lazy.force stream with
+    let rec print_stream (lazy cell) =
+      match cell with
 	| LazyStream.Nil ->
 	    flush ansi ()
 	| LazyStream.Cons ((elements,_), stream) ->

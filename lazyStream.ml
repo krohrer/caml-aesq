@@ -21,18 +21,14 @@ let sing x =
   let cell = Cons (x, nil) in
     lazy cell
 
+let rec forever x = lazy (Cons (x, forever x))
+let rec generate f = lazy (Cons (f (), generate f))
+
 let rec from g = lazy (from_aux g)
 and from_aux g =
   match g () with
     | None -> Nil
     | Some x -> Cons (x, from g)
-
-let init n f =
-  let rec gen i = lazy (gen_aux i)
-  and gen_aux i =
-    if i < n then Cons (f i, gen (i + 1)) else Nil
-  in
-    gen 0
 
 let hd (lazy c) =
   match c with
