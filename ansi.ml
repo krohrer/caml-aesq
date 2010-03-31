@@ -285,8 +285,8 @@ struct
       | `seq of cooked array
       ]
 
-  type width = int
-  type line = cooked array * width
+  type size = int
+  type line = cooked array * size
 
   let rec measure_line_width elements =
     let aux sum =
@@ -650,7 +650,7 @@ struct
 
   (*----------------------------------------------------------------------------*)
 
-  type tab = line LazyStream.t * width
+  type tab = line LazyStream.t * size
 
   let empty_tab width =
     (LazyStream.nil, width)
@@ -661,14 +661,13 @@ struct
   let rec tabulate
       ?(attr=default_attributes) 
       ?(fill=default_attributes)
-      ?(sep=`space 1)
-      tabs
+      streams
       =
-    let widths, streams = List.split tabs in
-    let sep = [|`attributes attr; sep|] in
-      tabulate_aux fill sep (Array.of_list widths) (Array.of_list streams)
+    let streams = Array.of_list streams in
+    let widths = Array.map (fun _ -> 0) streams in
+      tabulate_aux fill widths streams
 	      
-  and tabulate_aux fill sep widths streams =
+  and tabulate_aux fill widths streams =
     (* Use mutable state to generate the data for a lazy stream. This
        works because the function is only called once for each cons
        cell and the order of invocations is implicitly given by the
@@ -680,22 +679,20 @@ struct
     let exhausted = ref false in
     let rec gen () =
       exhausted := true;
-      let elems = Array.make (3 * count) (`space 0) in
+      let elems = Array.make count (`space 0) in
 	for i = 0 to count - 1 do
-	  let k = 3*i in
-	    if i > 0 then
-	      elems.(k) <- `seq sep;
-	    match Lazy.force streams.(i) with
-              | LazyStream.Nil ->
-                  elems.(k + 1) <- `attributes default_attributes;
-                  elems.(k + 2) <- `space widths.(i);
-	      | LazyStream.Cons ((elements,width), s) ->
-		  exhausted := false;
-		  streams.(i) <- s;
-		  elems.(k + 1) <- `seq elements;
-		  let fill_space = max 0 (widths.(i) - width) in
-		    if fill_space > 0 then
-		      elems.(k + 2) <- `seq [|`attributes fill; `space fill_space|]
+	  match Lazy.force streams.(i) with
+            | LazyStream.Nil ->
+                elems.(i) <-
+		  `seq [|
+		    `attributes fill;
+		    `space widths.(i)
+		  |]
+	    | LazyStream.Cons ((elements,width), s) ->
+		widths.(i) <- width;
+		exhausted := false;
+		streams.(i) <- s;
+		elems.(i) <- `seq elements;
 	done;
 	if !exhausted then
 	  LazyStream.Nil
@@ -704,6 +701,18 @@ struct
 			   Lazy.lazy_from_fun gen)
     in
       Lazy.lazy_from_fun gen
+
+  (*----------------------------------------------------------------------------*)
+
+  let pad
+      ?(fill=default_attributes)
+      ?(left=1)
+      ?(right=1)
+      ?(top=1)
+      ?(bottom=1)
+      stream
+      =
+    lazy LazyStream.Nil
 
   (*----------------------------------------------------------------------------*)
 

@@ -68,7 +68,7 @@ module Text :
 sig
   type printable = [ `fragment of string | `space of int ]
 
-  type width = int
+  type size = int
   type line
 
   type raw =
@@ -87,21 +87,28 @@ sig
 
   val empty_line : line
   val make_line : cooked array -> line
-  val line_width : line -> width
+  val line_width : line -> size
   val line_concat : line list -> line
 
   val format :
     ?attr:attributes ->
     ?fill:attributes ->
-    ?width:width ->
+    ?width:size ->
     ?just:justification ->
     raw LazyStream.t -> line LazyStream.t
 
   val tabulate :
     ?attr:attributes ->
     ?fill:attributes ->
-    ?sep:cooked ->
-    (width * line LazyStream.t) list -> line LazyStream.t
+    line LazyStream.t list -> line LazyStream.t
+
+  val pad :
+    ?fill:attributes ->
+    ?left:size ->
+    ?right:size ->
+    ?top:size ->
+    ?bottom:size ->
+    line LazyStream.t -> line LazyStream.t
 
   val dump_raw : out_channel -> raw LazyStream.t -> unit
 
