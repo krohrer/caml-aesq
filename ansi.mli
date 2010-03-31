@@ -90,6 +90,9 @@ sig
   val line_width : line -> size
   val line_concat : line list -> line
 
+  val width_of_first_line : line LazyStream.t -> size
+  val max_width_over_all_lines : line LazyStream.t -> size
+
   val format :
     ?attr:attributes ->
     ?fill:attributes ->
@@ -108,6 +111,11 @@ sig
     ?right:size ->
     ?top:size ->
     ?bottom:size ->
+    line LazyStream.t -> line LazyStream.t
+
+  val indent :
+    ?fill:attributes ->
+    size ->
     line LazyStream.t -> line LazyStream.t
 
   val dump_raw : out_channel -> raw LazyStream.t -> unit

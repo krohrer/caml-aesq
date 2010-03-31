@@ -650,6 +650,17 @@ struct
 
   (*----------------------------------------------------------------------------*)
 
+  let max_width_over_all_lines stream =
+    let aux m l = max m (line_width l) in
+      LazyStream.fold aux 0 stream
+
+  let width_of_first_line (lazy cell) =
+    match cell with
+      | LazyStream.Nil -> 0
+      | LazyStream.Cons (x, stream) -> line_width x 
+
+  (*----------------------------------------------------------------------------*)
+
   type tab = line LazyStream.t * size
 
   let empty_tab width =
@@ -664,7 +675,7 @@ struct
       streams
       =
     let streams = Array.of_list streams in
-    let widths = Array.map (fun _ -> 0) streams in
+    let widths = Array.map width_of_first_line streams in
       tabulate_aux fill widths streams
 	      
   and tabulate_aux fill widths streams =
@@ -712,7 +723,37 @@ struct
       ?(bottom=1)
       stream
       =
-    LazyStream.nil
+    let width = width_of_first_line stream in
+    let filler =
+      let fill_line =
+	make_line [|
+	  `attributes fill;
+	  `space (width + left + right)
+	|]
+      in
+	LazyStream.forever fill_line
+    in
+    let aux (elems,_) =
+      make_line [|
+	`attributes fill;
+	`space left;
+	`seq elems;
+	`attributes fill;
+	`space right
+      |]
+    in
+      LazyStream.flatten [
+	LazyStream.take top filler;
+	LazyStream.map aux stream;
+	LazyStream.take bottom filler
+      ]
+
+  let indent
+      ?(fill=default_attributes)
+      left
+      stream
+      =
+    pad ~fill ~left stream
 
   (*----------------------------------------------------------------------------*)
 
