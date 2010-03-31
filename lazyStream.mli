@@ -14,11 +14,18 @@ val nil : 'a t
 val cons : 'a -> 'a t -> 'a t
 val sing : 'a -> 'a t
 
+val from : (unit -> 'a option) -> 'a t
+val init : int -> (int -> 'a) -> 'a t
+
 val hd : 'a t -> 'a
 val tl : 'a t -> 'a t
 
 val map : ('a -> 'b) -> 'a t -> 'b t
+val filter : ('a -> bool) -> 'a t -> 'a t
+val filter_map : ('a -> 'b option) -> 'a t -> 'b t
+
 val fold : ('a -> 'b -> 'a) -> 'a -> 'b t -> 'a
+val iter : ('a -> unit) -> 'a t -> unit
 
 val append : 'a t -> 'a t -> 'a t
 val flatten : 'a t list -> 'a t

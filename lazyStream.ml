@@ -18,64 +18,102 @@ let cons x s =
     lazy cell
 
 let sing x =
-  let cell = Cons (x, lazy Nil) in
+  let cell = Cons (x, nil) in
     lazy cell
 
-let hd s =
-  match Lazy.force s with
+let rec from g = lazy (from_aux g)
+and from_aux g =
+  match g () with
+    | None -> Nil
+    | Some x -> Cons (x, from g)
+
+let init n f =
+  let rec gen i = lazy (gen_aux i)
+  and gen_aux i =
+    if i < n then Cons (f i, gen (i + 1)) else Nil
+  in
+    gen 0
+
+let hd (lazy c) =
+  match c with
     | Nil -> raise Empty
     | Cons (x, _) -> x
 
-let tl s =
-  match Lazy.force s with
+let tl (lazy c) =
+  match c with
     | Nil -> raise Empty
     | Cons (_, s) -> s
 
-let rec map f s =
-  match Lazy.force s with
-    | Nil -> lazy Nil
-    | Cons (x, s) -> lazy (Cons (f x, map f s))
+let rec map f s = lazy (map_aux f s)
+and map_aux f (lazy c) =
+  match c with
+    | Nil -> Nil
+    | Cons (x, s) -> Cons (f x, map f s)
 
-let rec fold f a s =
-  match Lazy.force s with
+let rec fold f a (lazy c) =
+  match c with
     | Nil -> a
     | Cons (x, s) -> fold f (f a x) s
 
-let rec append s sapp =
-  match Lazy.force s with
-    | Nil -> sapp
-    | Cons (x, s) -> lazy (Cons (x, append s sapp))
+let rec iter f (lazy c) =
+  match c with
+    | Nil -> ()
+    | Cons (x, s) -> f x; iter f s
 
-let flatten slist =
-  let rec fold s srest =
-    match Lazy.force s with
-      | Nil ->
-	  begin match srest with
-	    | [] -> Nil
-	    | s::srest -> fold s srest
-	  end
-      | Cons (x, s) -> Cons (x, lazy (fold s srest))
-  in
-    match slist with
-      | [] -> lazy Nil
-      | s::srest -> lazy (fold s srest)
+let rec filter p s = lazy (filter_aux p s)
+and filter_aux p (lazy c) =
+  match c with
+  | Nil -> Nil
+  | Cons (x, s) ->
+      if p x then
+	Cons (x, filter p s)
+      else
+	filter_aux p s
 
-let rec take n s =
-  if n > 0 then
-    match Lazy.force s with
-      | Nil -> lazy Nil
-      | Cons (x, s) -> lazy (Cons (x, take (n - 1) s))
-  else
-    lazy Nil
+let rec filter_map f s = lazy (filter_map_aux f s)
+and filter_map_aux f (lazy c) =
+  match c with
+    | Nil -> Nil
+    | Cons (x, s) ->
+	match f x with
+	  | None -> filter_map_aux f s
+	  | Some x -> Cons (x, filter_map f s)
 
-let rec drop n s =
-  if n > 0 then
-    match Lazy.force s with
-      | Nil -> lazy Nil
-      | Cons (_, s) -> drop (n - 1) s
-  else
-    s
-      
+let rec append s sapp = lazy (append_aux s sapp)
+and append_aux (lazy c) sapp =
+  match c with
+    | Nil -> Lazy.force sapp
+    | Cons (x, s) -> Cons (x, append s sapp)
+
+let rec flatten slist =
+  match slist with
+    | [] -> nil
+    | s::rest -> lazy (flatten_aux s rest)
+and flatten_aux (lazy c) rest =
+  match c with
+    | Nil -> Lazy.force (flatten rest)
+    | Cons (x, s) -> Cons (x, lazy (flatten_aux s rest))
+
+let rec take n s = lazy (take_aux n s)
+and take_aux n (lazy c) =
+  match c with
+    | Nil -> Nil
+    | Cons (x, s) ->
+	if n > 0 then
+	  Cons (x, take (n - 1) s)
+	else
+	  Nil
+
+let rec drop n s = lazy (drop_aux n s)
+and drop_aux n (lazy c) =
+  match c with
+    | Nil -> Nil
+    | Cons (_, s) ->
+	if n > 0 then
+	  drop_aux (n - 1) s
+	else
+	  Lazy.force s
+
 let rec length s =
   let aux sum _ = sum + 1 in
     fold aux 0 s
