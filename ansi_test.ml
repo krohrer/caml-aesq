@@ -47,10 +47,10 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s1 = random_stream 0 (1000000000) in
-  let s2 = random_stream 0 (700000000) in
-  let s3 = random_stream 0 (1000000000) in
-  let fill = Attributes.make ~background:`black ~blink:true () in
+  let s1 = random_stream 0 (100000000) in
+  let s2 = random_stream 0 (70000000) in
+  let s3 = random_stream 0 (100000000) in
+  let fill = Attributes.make ~background:`blue () in
     (* Text.dump_raw stdout s1; *)
     let fb = Text.format ~fill ~width:60 ~just:`block s1 in
     let fc = Text.format ~fill ~width:40 ~just:`center s2 in
@@ -59,10 +59,15 @@ let _ =
     (*   Text.print fmt (LazyStream.flatten [fb; fc; fb]); *)
       ignore [fb; fc; fr];
       let tab =
-	Text.tabulate ~fill [
-	  Text.pad ~fill ~left:2 ~right:2 fb;
-	  Text.pad ~fill ~left:2 ~right:2 fc;
-	  Text.pad ~fill ~left:2 ~right:2 fr
+	LazyStream.flatten [
+	  Text.format ~fill ~width:180 ~just:`right (random_stream 0 10);
+	  Text.pad ~fill:(Attributes.make ~background:`red ()) ~left:4 ~right:4 ~top:2 ~bottom:2 (
+	    Text.tabulate ~fill [
+	      Text.pad ~fill ~left:2 ~right:2 fb;
+	      Text.pad ~fill ~left:2 ~right:2 fc;
+	      Text.pad ~fill ~left:2 ~right:2 fr
+	    ]
+	  )
 	]
       in
 	Text.print std_formatter tab;

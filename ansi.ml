@@ -321,7 +321,9 @@ struct
 
   (* Closures are a poor mans objects, and [width] is the only
      constant field. Stream is not part of it, because it would
-     prevent the stream cells from getting gc'd. *)
+     prevent the stream cells from getting gc'd.
+
+     (or would it not?) *)
   and chop_aux width =
     (* Chop text so its lines are no longer than [width] *)
     let rec chop_line
