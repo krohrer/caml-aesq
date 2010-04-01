@@ -263,27 +263,17 @@ module Text =
 struct
   open ExtLib
 
-  type printable = [ `fragment of string | `space of int ]
-
   type raw =
-      [ `fragment of string
-      | `attributes of attributes
-      | `break
-      | `linebreak
-      ]
-
-  type chopped =
-      [ `fragment of string
-      | `attributes of attributes
-      | `break
-      ]
+    | RFrag of string
+    | RAttr of attributes
+    | RBreak
+    | RLineBreak
 
   type cooked =
-      [ `fragment of string
-      | `attributes of attributes
-      | `space of int
-      | `seq of cooked array
-      ]
+    | CFrag of string
+    | CAttr of attributes
+    | CSpace of int
+    | CSeq of cooked array
 
   type size = int
   type line = cooked array * size
@@ -291,10 +281,10 @@ struct
   let rec measure_line_width elements =
     let aux sum =
       function
-	| `fragment f -> sum + String.length f
-	| `space n -> sum + n
-	| `seq elements -> sum + measure_line_width elements
-	| `attributes _ -> sum
+	| CFrag f -> sum + String.length f
+	| CSpace n -> sum + n
+	| CSeq elements -> sum + measure_line_width elements
+	| CAttr _ -> sum
     in
       Array.fold_left aux 0 elements
 
@@ -320,10 +310,7 @@ struct
       chop_aux width attributes stream
 
   (* Closures are a poor mans objects, and [width] is the only
-     constant field. Stream is not part of it, because it would
-     prevent the stream cells from getting gc'd.
-
-     (or would it not?) *)
+     constant field. *)
   and chop_aux width =
     (* Chop text so its lines are no longer than [width] *)
     let rec chop_line
@@ -331,7 +318,7 @@ struct
 	(* Current attributes *)
 	?(rem_width=width)
 	(* Remaining width *)
-	?(line_rev=[`attributes attributes])
+	?(line_rev=[RAttr attributes])
 	(* Reverse list of line elements, start each line explicitly
 	   with the current attributes. Makes it easier to concat lines
 	   later on. *)
@@ -352,7 +339,7 @@ struct
 	| LazyStream.Cons (x, stream) ->
 	    (* Dispatch *)
 	    begin match x with
-	      | `fragment _ as x ->
+	      | RFrag _ as x ->
 		  chop_fragment
 		    ~attributes
 		    ~rem_width
@@ -360,19 +347,19 @@ struct
 		    ~dismissables
 		    x
 		    stream
-	      | `break ->
+	      | RBreak ->
 		  chop_break
 		    ~attributes
 		    ~rem_width
 		    ~line_rev
 		    ~dismissables
 		    stream
-	      | `linebreak ->
+	      | RLineBreak ->
 		  chop_linebreak
 		    ~attributes
 		    ~line_rev
 		    stream
-	      | `attributes _ as x ->
+	      | RAttr attributes as x ->
 		  chop_set_attributes
 		    ~attributes
 		    ~rem_width
@@ -402,9 +389,10 @@ struct
 	~rem_width
 	~line_rev
 	~dismissables
-	(`fragment frag as fragment)
+	fragment
 	stream
 	=
+      let frag = match fragment with RFrag f -> f | _ -> assert false in
       let len = String.length frag in
 	if len <= rem_width then
 	  (* Fragment still fits on this line *)
@@ -420,12 +408,12 @@ struct
 	  let line =
 	    let frag_left = String.slice ~last:rem_width frag in
 	      make_chopped
-		(`fragment frag_left :: Option.default line_rev dismissables)
+		(RFrag frag_left :: Option.default line_rev dismissables)
 	  and cell =
 	    let frag_right = String.slice ~first:rem_width frag in
 	      (* Prefix stream for next line with left-overs
 		 from current line *)
-	      LazyStream.Cons (`fragment frag_right,
+	      LazyStream.Cons (RFrag frag_right,
 			       stream)
 	  in
 	    LazyStream.Cons (line,
@@ -471,7 +459,7 @@ struct
 		 column, if there is still space left. *)
 	      if rem_width > 1 then
 		let dismissables =
-		  `break :: Option.default line_rev dismissables
+		  RBreak :: Option.default line_rev dismissables
 		in
 		  chop_line
 		    ~attributes
@@ -514,7 +502,7 @@ struct
 	~rem_width
 	~line_rev
 	~dismissables
-	(`attributes attributes as x)
+	attr
 	stream
 	=
       match dismissables with
@@ -524,7 +512,7 @@ struct
 	    chop_line
 	      ~attributes
 	      ~rem_width
-	      ~line_rev:(x :: line_rev)
+	      ~line_rev:(attr :: line_rev)
 	      stream
 	| Some breaks ->
 	    (* We have one or more loose breaks after a
@@ -533,7 +521,7 @@ struct
 	      ~attributes
 	      ~rem_width
 	      ~line_rev
-	      ~dismissables:(x :: breaks)
+	      ~dismissables:(attr :: breaks)
 	      stream
 
     (* Make a chopped line *)
@@ -549,11 +537,13 @@ struct
 
   (*------------------------------------*)
 	
-  (* Convert break to space of width 1, leave the rest as is *)
+  (* Convert break to space of width 1 *)
   let break_to_space =
     function
-      | `fragment _ | `attributes _ as x -> x
-      | `break -> `space 1
+      | RFrag f -> CFrag f
+      | RAttr a -> CAttr a
+      | RBreak -> CSpace 1
+      | RLineBreak -> CSpace 0
 
   (* Convert breaks to spaces by distributing [break_space] evenly
      among all spaces. Because widths are integers, we use something
@@ -561,17 +551,19 @@ struct
   let break_to_space' ~break_space ~break_count () =
     let a = ref break_space in
       function
-	| `fragment _ | `attributes _ as x -> x
-	| `break ->
-	    let x = `space (!a / break_count) in
+	| RFrag f -> CFrag f
+	| RAttr a -> CAttr a
+	| RBreak ->
+	    let x = CSpace (!a / break_count) in
 	      a := !a mod break_count + break_space;
 	      x
+	| RLineBreak -> CSpace 0
       
   (* Measure total width of all printable elements *)
   let measure_fragments elements =
     let aux sum =
       function
-	| `fragment f -> sum + String.length f
+	| RFrag f -> sum + String.length f
 	| _ -> sum
     in
       Array.fold_left aux 0 elements
@@ -580,7 +572,7 @@ struct
   let count_breaks elements =
     let aux sum =
       function
-	| `break -> sum + 1
+	| RBreak -> sum + 1
 	| _ -> sum
     in
       Array.fold_left aux 0 elements
@@ -601,36 +593,39 @@ struct
 	| `left ->
 	    (* Add left-over space on the right side *)
 	    let space = max 0 (width - fragment_width - break_count) in
-	    let count = Array.length elements in
-	    let line = Array.make (count+2) (`space 0) in
-	    let aux i x = line.(i) <- break_to_space x in
-	      Array.iteri aux elements;
-	      line.(count  ) <- `attributes fill;
-	      line.(count+1) <- `space space;
+            let line =
+	      [|
+	    	CSeq (Array.map break_to_space elements);
+	    	CAttr fill;
+	    	CSpace space
+	      |]
+	    in
 	      (line, width)
 	| `center ->
 	    (* Add a bit of left-over space on both sides *)
 	    let space = max 0 (width - fragment_width - break_count) in
 	    let left_space = space / 2 in
 	    let right_space = space - left_space in
-	    let count = Array.length elements in
-	    let line = Array.make (count+4) (`space 0) in
-	    let aux i x = line.(i+2) <- break_to_space x in
-	      line.(0) <- `attributes fill;
-	      line.(1) <- `space left_space;
-	      Array.iteri aux elements;
-	      line.(count+2) <- `attributes fill;
-	      line.(count+3) <- `space right_space;
+	    let line =
+	      [|
+	    	CAttr fill;
+	    	CSpace left_space;
+	    	CSeq (Array.map break_to_space elements);
+	    	CAttr fill;
+	    	CSpace right_space
+	      |]
+	    in
 	      (line, width)
 	| `right ->
 	    (* Add left-over space on the left side *)
 	    let space = max 0 (width - fragment_width - break_count) in
-	    let count = Array.length elements in
-	    let line = Array.make (count+2) (`space 0) in
-	    let aux i x = line.(i+2) <- break_to_space x in
-	      line.(0) <- `attributes fill;
-	      line.(1) <- `space space;
-	      Array.iteri aux elements;
+	    let line =
+	      [|
+	    	CAttr fill;
+	    	CSpace space;
+	    	CSeq (Array.map break_to_space elements)
+	      |]
+	    in
 	      (line, width)
 	| `block ->
 	    (* Distribute *)
@@ -692,20 +687,20 @@ struct
     let exhausted = ref false in
     let rec gen () =
       exhausted := true;
-      let elems = Array.make count (`space 0) in
+      let elems = Array.make count (CSpace 0) in
 	for i = 0 to count - 1 do
 	  match Lazy.force streams.(i) with
             | LazyStream.Nil ->
                 elems.(i) <-
-		  `seq [|
-		    `attributes fill;
-		    `space widths.(i)
+		  CSeq [|
+		    CAttr fill;
+		    CSpace widths.(i)
 		  |]
 	    | LazyStream.Cons ((elements,width), s) ->
 		widths.(i) <- width;
 		exhausted := false;
 		streams.(i) <- s;
-		elems.(i) <- `seq elements;
+		elems.(i) <- CSeq elements;
 	done;
 	if !exhausted then
 	  LazyStream.Nil
@@ -729,19 +724,19 @@ struct
     let filler =
       let fill_line =
 	make_line [|
-	  `attributes fill;
-	  `space (width + left + right)
+	  CAttr fill;
+	  CSpace (width + left + right)
 	|]
       in
 	LazyStream.forever fill_line
     in
     let aux (elems,_) =
       make_line [|
-	`attributes fill;
-	`space left;
-	`seq elems;
-	`attributes fill;
-	`space right
+	CAttr fill;
+	CSpace left;
+	CSeq elems;
+	CAttr fill;
+	CSpace right
       |]
     in
       LazyStream.flatten [
@@ -768,13 +763,13 @@ struct
 	  Pervasives.flush outc
       | LazyStream.Cons (x, stream) ->
 	  begin match x with
-	    | `fragment f ->
+	    | RFrag f ->
 		fprintf outc "%S " f
-	    | `break ->
+	    | RBreak ->
 		fprintf outc "BR "
-	    | `linebreak -> 
+	    | RLineBreak -> 
 		fprintf outc "LBR\n"
-	    | `attributes c ->
+	    | RAttr c ->
 		fprintf outc "ATTRS(%s) " (attributes_to_string c)
 	  end;
 	  dump_raw outc stream
@@ -792,13 +787,13 @@ struct
 
     and dump_element =
       function
-	| `fragment f ->
+	| CFrag f ->
 	    fprintf outc "%S " f
-	| `space n ->
+	| CSpace n ->
 	    fprintf outc "SP(%d) " n
-	| `attributes c ->
+	| CAttr c ->
 	    fprintf outc "ATTRS(%s) " (attributes_to_string c)
-	| `seq elements ->
+	| CSeq elements ->
 	    fprintf outc "[[ ";
 	    Array.iter dump_element elements;
 	    fprintf outc "]] "
@@ -817,13 +812,13 @@ struct
 
     and print_element =
       function
-	| `fragment f ->
+	| CFrag f ->
 	    print_string ansi f
-	| `space n ->
+	| CSpace n ->
 	    print_space ansi n
-	| `attributes c ->
+	| CAttr c ->
 	    set_attributes ansi c
-	| `seq elements ->
+	| CSeq elements ->
 	    Array.iter print_element elements
     in
       print_stream

@@ -29,13 +29,13 @@ let random_attributes =
 let random_elem () =
   let r = Random.int 1000 in
     if r < 500 then
-      `fragment (random_word ())
+      Text.RFrag (random_word ())
     else if r < 990 then
-      `break
+      Text.RBreak
     else if r < 998 then
-      `attributes (random_attributes ())
+      Text.RAttr (random_attributes ())
     else
-      `linebreak
+      Text.RLineBreak
 
 let rec random_stream i n =
   lazy begin
@@ -47,9 +47,9 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s1 = random_stream 0 (100000000) in
-  let s2 = random_stream 0 (70000000) in
-  let s3 = random_stream 0 (100000000) in
+  let s1 = random_stream 0 (10000000) in
+  let s2 = random_stream 0 (7000000) in
+  let s3 = random_stream 0 (10000000) in
   let fill = Attributes.make ~background:`blue () in
     (* Text.dump_raw stdout s1; *)
     let fb = Text.format ~fill ~width:60 ~just:`block s1 in

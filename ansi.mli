@@ -66,24 +66,20 @@ end
 (** {6 High-level streams and printing} *)
 module Text :
 sig
-  type printable = [ `fragment of string | `space of int ]
-
   type size = int
   type line
 
   type raw =
-      [ `fragment of string
-      | `attributes of attributes
-      | `break
-      | `linebreak
-      ]
+    | RFrag of string
+    | RAttr of attributes
+    | RBreak
+    | RLineBreak
 
   type cooked =
-      [ `fragment of string
-      | `attributes of attributes
-      | `space of int
-      | `seq of cooked array
-      ]
+    | CFrag of string
+    | CAttr of attributes
+    | CSpace of int
+    | CSeq of cooked array
 
   val empty_line : line
   val make_line : cooked array -> line
