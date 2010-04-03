@@ -144,9 +144,10 @@ OCAML_NATIVE_LINK_FLAGS +=
 #
 
 FILES[] =
-    ansi
-    lazyStream
-#    doca
+	ansi
+	lazyStream
+	trie
+#	doca
 
 
 CUSTOM = docatop
