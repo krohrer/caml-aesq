@@ -87,6 +87,7 @@ public.OCamlTop(name, files) =
 USE_OCAMLFIND = true
 
 OCAMLPACKS[] =
+	str
 	extlib
 
 OCAMLFINDFLAGS +=
@@ -146,7 +147,8 @@ OCAML_NATIVE_LINK_FLAGS +=
 FILES[] =
 	ansi
 	lazyStream
-	trie
+	inspect
+	hyphenate
 #	doca
 
 
