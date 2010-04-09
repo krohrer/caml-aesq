@@ -12,6 +12,8 @@ end
 
 module HT = Hashtbl.Make(ValueRepr)
 
+open ExtLib
+
 let failfmt fmt =
   let k s =
     failwith ("Inspect: " ^ s)
@@ -26,8 +28,78 @@ let addr r = magic r lsl 1
      bit-pattern (or address) of the value, we therefore have to
      left-shift by 1. *)
 
-let dump_with_formatter fmt o =
+(*------------------------------------*)
+
+type tag =
+    [
+    | `lazy_tag
+    | `closure_tag
+    | `object_tag
+    | `infix_tag
+    | `forward_tag
+    | `no_scan_tag
+    | `abstract_tag
+    | `string_tag
+    | `double_tag
+    | `double_array_tag
+    | `custom_tag
+    | `int_tag
+    | `out_of_heap_tag
+    | `unaligned_tag
+    ]
+
+module TagType :
+sig
+  type t = tag
+  val compare : t -> t -> int
+end =
+struct
+  type t = tag
+  let compare = compare
+end
+
+module Tags =
+  Set.Make(TagType)
+
+let all_tags =
+  List.fold_right Tags.add
+    [
+      `lazy_tag;
+      `closure_tag;
+      `object_tag;
+      `infix_tag;
+      `forward_tag;
+      `no_scan_tag;
+      `abstract_tag;
+      `string_tag;
+      `double_tag;
+      `double_array_tag;
+      `custom_tag;
+      `int_tag;
+      `out_of_heap_tag;
+      `unaligned_tag;
+    ]
+    Tags.empty
+
+(*------------------------------------*)
+
+let rec dump ?tags ?max_depth o =
+  dump_with_formatter ?tags ?max_depth std_formatter (repr o)
+
+and dump_to_channel ?tags ?max_depth c o =
+  dump_with_formatter ?tags ?max_depth (formatter_of_out_channel c) (repr o)
+
+and dump_to_buffer ?tags ?max_depth b o =
+  dump_with_formatter ?tags ?max_depth (formatter_of_buffer b) (repr o)
+
+and dump_to_string ?tags ?max_depth o =
+  let b = Buffer.create 128 in
+    dump_to_buffer ?tags ?max_depth b o;
+    Buffer.contents b
+
+and dump_with_formatter ?(tags=all_tags) ?(max_depth=30) fmt o =
   let dumped_blocks = HT.create 31337 in
+  let postponed_blocks = Queue.create () in
   let indentation_for_string id = 2 (* String.length id + 2 *) in
 
   let rec dump_int fmt i = 
@@ -42,19 +114,24 @@ let dump_with_formatter fmt o =
   and dump_double fmt d =
     fprintf fmt "%e" d
 
-  and dump_block name fmt r =
+  and dump_block ~depth name fmt r =
     try
       fprintf fmt "@@%s" (HT.find dumped_blocks r)
     with Not_found -> begin
       let id = sprintf "%s/%d" name (HT.length dumped_blocks) in
-	HT.add dumped_blocks r id;
-	fprintf fmt "@[<b %d>(%s" (indentation_for_string id) id;
-	for i = 0 to size r - 1 do
-	  fprintf fmt "@ ";
-	  let f = field r i in
-	    dump_aux fmt f
-	done;
-	fprintf fmt ")@]@,"
+	if depth < max_depth then begin
+	  HT.add dumped_blocks r id;
+	  fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
+	  for i = 0 to size r - 1 do
+	    fprintf fmt "@ ";
+	    let f = field r i in
+	      dump_aux ~depth:(depth + 1) fmt f
+	  done;
+	  fprintf fmt "@,)@]"
+	end else begin
+	  fprintf fmt "@@%s" id;
+	  Queue.add r postponed_blocks
+	end
     end
 
   and dump_double_array a fmt r =
@@ -63,12 +140,12 @@ let dump_with_formatter fmt o =
     with Not_found -> begin
       let id = sprintf "FLA/%d" (HT.length dumped_blocks) in
 	HT.add dumped_blocks r id;
-	fprintf fmt "@[<b %d>(%s" (indentation_for_string id) id;
+	fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
 	for i = 0 to Array.length a - 1 do
 	  fprintf fmt "@ ";
 	  dump_double fmt a.(i)
 	done;
-	fprintf fmt ")@]@,"
+	fprintf fmt "@,)@]"
     end
       
   and dump_abstract fmt r =
@@ -84,20 +161,20 @@ let dump_with_formatter fmt o =
   and dump_string fmt s =
     fprintf fmt "\"%s\"" s
 
-  and dump_aux fmt r =
+  and dump_aux ~depth fmt r =
     match tag r with
       | x when x = lazy_tag ->
-	  dump_block "LZY" fmt r
+	  dump_block ~depth "LZY" fmt r
       | x when x = closure_tag ->
-	  dump_block "CLO" fmt r
+	  dump_block ~depth "CLO" fmt r
       | x when x = object_tag ->
-	  dump_block "OBJ" fmt r
+	  dump_block ~depth "OBJ" fmt r
       | x when x = infix_tag ->
-	  dump_block "IFX" fmt r
+	  dump_block ~depth "IFX" fmt r
       | x when x = forward_tag ->
-	  dump_block "FWD" fmt r
+	  dump_block ~depth "FWD" fmt r
       | x when x < no_scan_tag ->
-	  dump_block (sprintf "T%d" x) fmt r
+	  dump_block ~depth (sprintf "T%d" x) fmt r
       | x when x = abstract_tag ->
 	  dump_abstract fmt r
       | x when x = string_tag ->
@@ -118,33 +195,20 @@ let dump_with_formatter fmt o =
       | x ->
 	  failfmt "OCaml value with unknown tag = %d" x
   in
-    dump_aux fmt (repr o);
-    pp_print_newline fmt ()
-
-(*------------------------------------*)
-
-let dump o =
-  dump_with_formatter std_formatter (repr o);
-
-let dump_to_channel c o =
-  dump_with_formatter (formatter_of_out_channel c) (repr o)
-
-let dump_to_buffer b o =
-  dump_with_formatter (formatter_of_buffer b) (repr o)
-
-let dump_to_string o =
-  let b = Buffer.create 128 in
-    dump_to_buffer b o;
-    Buffer.contents b
+    dump_aux ~depth:0 fmt (repr o);
+    pp_print_newline fmt ();
+    while not (Queue.is_empty postponed_blocks) do
+      let r = Queue.take postponed_blocks in
+	if not (HT.mem dumped_blocks r) then dump_aux ~depth:0 fmt r;
+	pp_print_newline fmt ()
+    done
 
 (*----------------------------------------------------------------------------*)
 
 let wobytes = Sys.word_size / 8
 let hdbytes = wobytes
 
-open ExtLib
-
-let heap_size o =
+let heap_size ?(tags=all_tags) o =
   let bytes = ref 0 in
   let add_bytes d =
     bytes := !bytes + d
