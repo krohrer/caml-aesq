@@ -1,49 +1,61 @@
 (* Kaspar Rohrer, Thu Apr  8 02:24:17 CEST 2010 *)
 
 open Format
+open Obj
+
+let failfmt fmt =
+  let k s =
+    failwith ("Inspect: " ^ s)
+  in
+    Printf.ksprintf k fmt
 
 let rec obj_is_list r =
-  if Obj.is_int r then
-    r = Obj.repr 0
+  if is_int r then
+    r = repr 0
   else
-    if Obj.tag r = 0 && Obj.size r = 2 then
-      obj_is_list (Obj.field r 1)
+    if tag r = 0 && size r = 2 then
+      obj_is_list (field r 1)
     else
       false
 
 let rec dump fmt r =
-  ()
-
-and dump_int fmt r =
-  pp_print_int fmt (Obj.magic r)
-
-and dump_opaque fmt str r =
-  pp_open_box fmt 2;
-  pp_print_string fmt "<";
-  pp_print_string fmt str;
-  for i = 0 to Obj.size r do
-    if i > 0 then
-      pp_print_space fmt ();
-    dump fmt (Obj.field r i)
-  done;
-  pp_print_string fmt ">";
-  pp_close_box fmt ()
-
-and dump_list fmt r =
-  if Obj.is_int r then
-    assert (Obj.magic r = 0)
-  else begin
-    assert (Obj.tag r = 0 && Obj.size r = 2);
-    let head = Obj.field r 0 and tail = Obj.field r 1 in
-      dump fmt head;
-      if Obj.is_int tail then
-	assert (Obj.magic r = 0)
-      else begin
-	pp_print_string fmt ";";
-	pp_print_space fmt ();
-	dump_list fmt tail
-      end
-  end
+  let dump_int flag fmt i = 
+    match flag with
+      | `hex -> fprintf fmt "0x%X" i
+      | `dec -> pp_print_int fmt i
+  in
+    match tag r with
+      | x when x = lazy_tag ->
+	  ()
+      | x when x = closure_tag ->
+	  ()
+      | x when x = object_tag ->
+	  ()
+      | x when x = infix_tag ->
+	  ()
+      | x when x = forward_tag ->
+	  ()
+      | x when x < no_scan_tag ->
+	  ()
+      | x when x = abstract_tag ->
+	  ()
+      | x when x = string_tag ->
+	  ()
+      | x when x = double_tag ->
+	  ()
+      | x when x = double_array_tag ->
+	  ()
+      | x when x = custom_tag ->
+	  ()
+	    (* | x when x = final_tag -> () (* Same as custom_tag *) *)
+      | x when x = int_tag ->
+	  dump_int `dec fmt (magic r)
+      | x when x = out_of_heap_tag ->
+	  dump_int `hex fmt (magic r)
+      | x when x = unaligned_tag ->
+	  dump_int `hex fmt (magic r)
+	    (* according to ${OCAMLSRC}/byterun/mlvalues.h *)
+      | x -> failfmt "OCaml value with unknown tag = %d" x
 
 (*----------------------------------------------------------------------------*)
 
@@ -87,24 +99,24 @@ let heap_size o =
       HT.add inspected r ();
       r
   in
-    Stack.push (Obj.repr o) candidates;
+    Stack.push (repr o) candidates;
     while has_candidates () do
       let r = next_candidate () in
-      let t = Obj.tag r in
-	if t < Obj.no_scan_tag then begin
-	  let n = Obj.size r in
-      	    for i = 0 to n do add_candidate (Obj.field r i) done;
+      let t = tag r in
+	if t < no_scan_tag then begin
+	  let n = size r in
+      	    for i = 0 to n do add_candidate (field r i) done;
 	    add_header ();
 	    add_words n
 	end else if
-	  t = Obj.abstract_tag ||
-	  t = Obj.string_tag ||
-	  t = Obj.double_tag ||
-	  t = Obj.double_array_tag ||
-	  t = Obj.custom_tag
+	  t = abstract_tag ||
+	  t = string_tag ||
+	  t = double_tag ||
+	  t = double_array_tag ||
+	  t = custom_tag
 	then begin
 	  add_header ();
-	  add_words (Obj.size r)
+	  add_words (size r)
 	end else
 	  ()
     done;
