@@ -1,26 +1,27 @@
 (* Kaspar Rohrer, Thu Apr  8 02:00:21 CEST 2010 *)
 
 type tag =
-    [
-    | `lazy_tag
-    | `closure_tag
-    | `object_tag
-    | `infix_tag
-    | `forward_tag
-    | `no_scan_tag
-    | `abstract_tag
-    | `string_tag
-    | `double_tag
-    | `double_array_tag
-    | `custom_tag
-    | `int_tag
-    | `out_of_heap_tag
-    | `unaligned_tag
-    ]
+  | Lazy
+  | Closure
+  | Object
+  | Infix
+  | Forward
+  | Block
+  | Abstract
+  | String
+  | Double
+  | Double_array
+  | Custom
+  | Int
+  | Out_of_heap
+  | Unaligned
 
-module Tags : Set.S
+module Tags : sig
+  include Set.S with type elt = tag
 
-val all_tags : Tags.t
+  val all : t
+  val of_list : tag list -> t
+end
 
 val dump : ?tags:Tags.t -> ?max_depth:int -> 'a -> unit
 
@@ -30,4 +31,8 @@ val dump_to_buffer : ?tags:Tags.t -> ?max_depth:int -> Buffer.t -> 'a -> unit
 
 val dump_to_channel : ?tags:Tags.t -> ?max_depth:int -> out_channel -> 'a -> unit
 
-val heap_size : ?tags:Tags.t -> 'a -> int
+val dot : ?tags:Tags.t -> ?max_depth -> 'a -> unit
+
+val dot_to_channel : ?tags:Tags.t -> ?max_depth:int -> out_channel -> 'a -> unit
+
+val heap_size : ?tags:Tags.t -> ?follow:Tags.t -> 'a -> int
