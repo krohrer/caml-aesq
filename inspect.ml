@@ -278,6 +278,10 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 
 (*----------------------------------------------------------------------------*)
 
+type dot =
+  | Dot_node of string
+  | Dot_label of string
+
 let rec dot o =
   dot_with_formatter std_formatter (repr o)
 
@@ -298,7 +302,7 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
       HT.add dotted r id;
       id
   in
-  let rec dot fmt r = 
+  let rec dot fmt r =
     match tag_of_value r with
       | Lazy | Closure | Object | Infix | Forward | Block as x ->
 	  dot_block x fmt r
@@ -347,36 +351,44 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
 
   and dot_block t fmt r =
     let abbr = tag_abbr t in
-    let id =
+    let label =
       if t = Block then
-	dotted_make_id (sprintf "%s%d" abbr (tag r)) r
+	sprintf "%s%d" abbr (tag r)
       else
-	dotted_make_id abbr r
+	abbr
     in
+    let id = dotted_make_id label r in
     let n = size r in
-    let field_ids = Array.make n "" in
-      for i = 0 to n - 1 do
-	let fid = dot fmt (field r i) in
-	  link_open fmt (sprintf "%s:f%d" id i) fid;
-	  link_close fmt ();
-	  field_ids.(i) <- fid
-      done;
+    let fields =
+      Array.init n (fun i -> dot fmt (field r i))
+    in
+      Array.iteri
+	(fun i n -> match n with
+	   | Dot_node fid ->
+	       link_open fmt (sprintf "%s:f%d" id i) fid;
+	       link_close fmt ()
+	   | Dot_label _ -> ())
+	fields;
       node_open fmt id;
       attr_open fmt "label";
       fprintf fmt "%s" abbr;
-      for i = 0 to n - 1 do
-	fprintf fmt " |<f%d> %d" i i
-      done;
+      Array.iteri
+	(fun i n -> match n with
+	   | Dot_node _ ->
+	       fprintf fmt " |<f%d> %d" i i
+	   | Dot_label l -> 
+	       fprintf fmt " |<f%d> %s" i l)
+	fields;
       attr_close fmt ();
       node_close fmt ();
-      id
+      Dot_node id
 
-  and dot_generic abbr label fmt r=
+  and dot_generic abbr label fmt r =
     let id = dotted_make_id abbr r in
       node_open fmt id;
       attr_label fmt abbr;
       node_close fmt ();
-      id
+      Dot_node id
 
   and dot_abstract fmt r =
     let abbr = tag_abbr Abstract in
@@ -399,20 +411,18 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
       dot_generic abbr (sprintf "%s 0x%X" abbr (custom_id r)) fmt r
 
   and dot_int i fmt r =
-    let abbr = tag_abbr Int in
-      dot_generic abbr (sprintf "%d" i) fmt r
+    Dot_label (sprintf "%d" i)
 
   and dot_out_of_heap a fmt r =
-    let abbr = tag_abbr Out_of_heap in
-      dot_generic abbr (sprintf "0x%X" a) fmt r
+    Dot_label (sprintf "0x%X" a)
 
   and dot_unaligned a fmt r =
-    let abbr = tag_abbr Unaligned in
-      dot_generic abbr (sprintf "0x%X" a) fmt r
+    Dot_label (sprintf "0x%X" a)
 
   in
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
     fprintf fmt "node [shape=record, style=rounded];@,";
+    fprintf fmt "edge [len=3];@,";
     ignore (dot fmt r);
     fprintf fmt "@]@,}@]";
     pp_print_newline fmt ()
