@@ -29,9 +29,6 @@ let custom_id r =
      address instead. *)
   addr (field r 0)
 
-let fail_unknown_value x =
-  failwith (sprintf "OCaml value with unknown tag = %d" x)
-
 (*------------------------------------*)
 
 type tag =
@@ -98,6 +95,24 @@ let tag_abbr =
     | Int -> "INT"
     | Out_of_heap -> "ADDR"
     | Unaligned -> "ADDR"
+
+let tag_of_value r =
+  match tag r with
+    | x when x = lazy_tag -> Lazy
+    | x when x = closure_tag -> Closure
+    | x when x = object_tag -> Object
+    | x when x = infix_tag -> Infix
+    | x when x = forward_tag -> Forward
+    | x when x < no_scan_tag -> Block
+    | x when x = abstract_tag -> Abstract
+    | x when x = string_tag -> String
+    | x when x = double_tag -> Double
+    | x when x = double_array_tag -> Double_array
+    | x when x = custom_tag -> Custom
+    | x when x = int_tag -> Int
+    | x when x = out_of_heap_tag -> Out_of_heap
+    | x when x = unaligned_tag -> Unaligned
+    | x -> failwith (sprintf "OCaml value with unknown tag = %d" x)
 
 (*------------------------------------*)
 
@@ -229,38 +244,25 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 	fprintf fmt "%s:#%d" (tag_abbr t) (String.length s)
 
   and dump_aux ~depth fmt r =
-    match tag r with
-      | x when x = lazy_tag ->
-	  dump_block ~depth Lazy fmt r
-      | x when x = closure_tag ->
-	  dump_block ~depth Closure fmt r
-      | x when x = object_tag ->
-	  dump_block ~depth Object fmt r
-      | x when x = infix_tag ->
-	  dump_block ~depth Infix fmt r
-      | x when x = forward_tag ->
-	  dump_block ~depth Forward fmt r
-      | x when x < no_scan_tag ->
-	  dump_block ~depth Block fmt r
-      | x when x = abstract_tag ->
+    match tag_of_value r with
+      | Lazy | Closure | Object | Infix | Forward | Block as x ->
+	  dump_block ~depth x fmt r
+      | Abstract ->
 	  dump_abstract fmt r
-      | x when x = string_tag ->
+      | String ->
 	  dump_string (magic r) fmt r
-      | x when x = double_tag ->
+      | Double ->
 	  dump_double (magic r) fmt r
-      | x when x = double_array_tag ->
+      | Double_array ->
 	  dump_double_array (magic r) fmt r
-      | x when x = custom_tag ->
+      | Custom ->
 	  dump_custom fmt r
-	    (* | x when x = final_tag -> () (* Same as custom_tag *) *)
-      | x when x = int_tag ->
+      | Int ->
 	  dump_int (magic r) fmt r
-      | x when x = out_of_heap_tag ->
+      | Out_of_heap ->
 	  dump_out_of_heap (addr r) fmt r
-      | x when x = unaligned_tag ->
+      | Unaligned ->
 	  dump_unaligned (addr r) fmt r
-      | x ->
-	  fail_unknown_value x
   in
     fprintf fmt "@[";
     dump_aux ~depth:0 fmt (repr o);
@@ -279,6 +281,16 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 let rec dot o =
   dot_with_formatter std_formatter (repr o)
 
+and dot_to_file path o =
+  let oc = open_out path in
+    try
+      let fmt = formatter_of_out_channel oc in
+	dot_with_formatter fmt (repr o);
+	flush oc;
+	close_out oc
+    with
+      | _ -> close_out oc
+
 and dot_with_formatter ?(tags=Tags.all) fmt r =
   let dotted = HT.create 31337 in
   let dotted_make_id name r =
@@ -286,46 +298,26 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
       HT.add dotted r id;
       id
   in
-  (* let buffer = Buffer.create 80 in *)
-  (* let bprintf fmt = bprintf buffer fmt in *)
-  (* let bcontents () = *)
-  (*   let c = Buffer.contents buffer in *)
-  (*     Buffer.clear buffer; *)
-  (*     c *)
-  (* in *)
   let rec dot fmt r = 
-    match tag r with
-      | x when x = lazy_tag ->
-	  dot_block Lazy fmt r
-      | x when x = closure_tag ->
-	  dot_block Closure fmt r
-      | x when x = object_tag ->
-	  dot_block Object fmt r
-      | x when x = infix_tag ->
-	  dot_block Infix fmt r
-      | x when x = forward_tag ->
-	  dot_block Forward fmt r
-      | x when x < no_scan_tag ->
-	  dot_block Block fmt r
-      | x when x = abstract_tag ->
+    match tag_of_value r with
+      | Lazy | Closure | Object | Infix | Forward | Block as x ->
+	  dot_block x fmt r
+      | Abstract ->
 	  dot_abstract fmt r
-      | x when x = string_tag ->
+      | String ->
 	  dot_string (magic r) fmt r
-      | x when x = double_tag ->
+      | Double ->
 	  dot_double (magic r) fmt r
-      | x when x = double_array_tag ->
+      | Double_array ->
 	  dot_double_array (magic r) fmt r
-      | x when x = custom_tag ->
+      | Custom ->
 	  dot_custom fmt r
-	    (* | x when x = final_tag -> () (* Same as custom_tag *) *)
-      | x when x = int_tag ->
+      | Int ->
 	  dot_int (magic r) fmt r
-      | x when x = out_of_heap_tag ->
+      | Out_of_heap ->
 	  dot_out_of_heap (addr r) fmt r
-      | x when x = unaligned_tag ->
+      | Unaligned ->
 	  dot_unaligned (addr r) fmt r
-      | x ->
-	  fail_unknown_value x
 
   and node_open fmt id =
     fprintf fmt "@[<2>%s@ [" id
@@ -419,7 +411,8 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
       dot_generic abbr (sprintf "0x%X" a) fmt r
 
   in
-    fprintf fmt "@[<v>digraph {@[<v 2>@,";
+    fprintf fmt "@[<v>@[<v 2>digraph {@,";
+    fprintf fmt "node [shape=record, style=rounded];@,";
     ignore (dot fmt r);
     fprintf fmt "@]@,}@]";
     pp_print_newline fmt ()
@@ -450,61 +443,29 @@ let heap_size ?(tags=Tags.all) ?(follow=Tags.all) o =
   let add_bytes d =
     bytes := !bytes + d
   in
-  let add_block t r =
-    let n = size r in
-      begin
-	if Tags.mem t tags then
-	  add_bytes (hdbytes + n*wobytes);
-	if Tags.mem t follow then
-	  for i = 0 to n - 1 do
-	    add_candidate (field r i)
-	  done
-      end
-  in
-  let add_no_scan t r =
-    let n = size r in
-      begin
-	if Tags.mem t tags then
-	  add_bytes (hdbytes + n*wobytes)
-      end
-  in
     Stack.push (repr o) candidates;
     while has_candidates () do
       let r = next_candidate () in
-	match tag r with
-
-	  | x when x = lazy_tag ->
-	      add_block Lazy r
-	  | x when x = closure_tag ->
-	      add_block Closure r
-	  | x when x = object_tag ->
-	      add_no_scan Object r
-	  | x when x = infix_tag ->
-	      add_no_scan Infix r
-	  | x when x = forward_tag ->
-	      add_block Forward r
-	  | x when x < no_scan_tag ->
-	      add_block Block r
-
-	  | x when x = abstract_tag ->
-	      add_no_scan Abstract r
-	  | x when x = string_tag ->
-	      add_no_scan String r
-	  | x when x = double_tag ->
-	      add_no_scan Double r
-	  | x when x = double_array_tag ->
-	      add_no_scan Double r
-	  | x when x = custom_tag ->
-	      add_no_scan Custom r
-
-	  | x when x = int_tag ->
-	      add_bytes 0
-	  | x when x = out_of_heap_tag ->
-	      add_bytes 0
-	  | x when x = unaligned_tag ->
-	      add_bytes 0
-	  | x ->
-	      fail_unknown_value x
+      let t = tag_of_value r in
+	match t with
+	  | Lazy | Closure | Object | Infix | Forward | Block as x ->
+	      let n = size r in
+		begin
+		  if Tags.mem x tags then
+		    add_bytes (hdbytes + n*wobytes);
+		  if Tags.mem x follow then
+		    for i = 0 to n - 1 do
+		      add_candidate (field r i)
+		    done
+		end
+	  | Abstract | String | Double | Double_array | Custom as x->
+	      let n = size r in
+		begin
+		  if Tags.mem x tags then
+		    add_bytes (hdbytes * n*wobytes)
+		end
+	  | Int | Out_of_heap | Unaligned ->
+	      ()
     done;
     !bytes
 

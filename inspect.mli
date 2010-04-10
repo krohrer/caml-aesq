@@ -25,6 +25,8 @@ end
 
 val dot : 'a -> unit
 
+val dot_to_file : string -> 'a -> unit
+
 val dump : ?tags:Tags.t -> ?max_depth:int -> 'a -> unit
 
 val dump_to_string : ?tags:Tags.t -> ?max_depth:int -> 'a -> string
