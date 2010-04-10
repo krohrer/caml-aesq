@@ -12,13 +12,16 @@ end
 
 module HT = Hashtbl.Make(ValueRepr)
 
-let addr r = magic r lsl 1
-  (* according to ${OCAMLSRC}/byterun/mlvalues.h, integers always have
-     the LSB set, and only the upper (Sys.word_size - 1) bits are used
-     to represent the number. Which means that the actual number is
-     the bits of the value right-shifted by 1. If we want to print the
-     bit-pattern (or address) of the value, we therefore have to
-     left-shift by 1. *)
+let addr r =
+  let h = Nativeint.of_int (magic r land max_int) in
+    Nativeint.add h h
+      (* according to ${OCAMLSRC}/byterun/mlvalues.h, integers always
+	 have the LSB set, and only the upper (Sys.word_size - 1) bits
+	 are used to represent the number. Which means that the actual
+	 number is the bits of the value right-shifted by 1. If we
+	 want to print the bit-pattern (or address) of the value, we
+	 therefore have to make sure that the lower bit is one to make
+	 a proper int of it and then multiply by 2. *)
 
 let custom_id r =
   assert (tag r = custom_tag);
@@ -79,23 +82,6 @@ struct
     ]
 end
 
-let tag_abbr = 
-  function
-    | Lazy -> "LAZY"
-    | Closure -> "CLOS"
-    | Object -> "OBJ"
-    | Infix -> "INFX"
-    | Forward -> "FWD"
-    | Block -> "BLK"
-    | Abstract -> "ABST"
-    | String -> "STR"
-    | Double -> "DBL"
-    | Double_array -> "DBLA"
-    | Custom -> "CUST"
-    | Int -> "INT"
-    | Out_of_heap -> "ADDR"
-    | Unaligned -> "ADDR"
-
 let tag_of_value r =
   match tag r with
     | x when x = lazy_tag -> Lazy
@@ -113,6 +99,27 @@ let tag_of_value r =
     | x when x = out_of_heap_tag -> Out_of_heap
     | x when x = unaligned_tag -> Unaligned
     | x -> failwith (sprintf "OCaml value with unknown tag = %d" x)
+
+let tag_abbr t r = 
+  match t with
+    | Lazy -> "LAZY"
+    | Closure -> "CLOS"
+    | Object -> "OBJ"
+    | Infix -> "INFX"
+    | Forward -> "FWD"
+    | Block -> sprintf "BL%d" (tag r)
+    | Abstract -> "ABST"
+    | String -> "STR"
+    | Double -> "DBL"
+    | Double_array -> "DBLA"
+    | Custom -> "CUST"
+    | Int -> "INT"
+    | Out_of_heap -> "ADDR"
+    | Unaligned -> "ADDR"
+
+let value_abbr r =
+  let t = tag_of_value r in
+    tag_abbr t r
 
 (*------------------------------------*)
 
@@ -135,57 +142,48 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
   let wave = Queue.create () in
   let indentation_for_string id = 2 (* String.length id + 2 *) in
 
-  let rec dump_int i fmt _ = 
+  let make_id abbr =
+    let n = HT.length dumped_blocks in
+      sprintf "%s/%X" abbr n
+  in
+
+  let rec dump_int i fmt r = 
     let t = Int in
       if Tags.mem t tags then
 	fprintf fmt "%d" i
       else
-	fprintf fmt "%s" (tag_abbr t)
+	fprintf fmt "%s" (tag_abbr t r)
 
-  and dump_out_of_heap a fmt _ =
+  and dump_out_of_heap a fmt r =
     let t = Out_of_heap in
       if Tags.mem t tags then
-	fprintf fmt "0x%X!" a
+	fprintf fmt "0x%nX!" a
       else
-	fprintf fmt "%s" (tag_abbr t)
+	fprintf fmt "%s" (tag_abbr t r)
 
-  and dump_unaligned a fmt _ =
+  and dump_unaligned a fmt r =
     let t = Unaligned in
       if Tags.mem t tags then
-	fprintf fmt "0x%X?" a
+	fprintf fmt "0x%nX?" a
       else
-	fprintf fmt "%s" (tag_abbr t)
+	fprintf fmt "%s" (tag_abbr t r)
 
-  and dump_double d fmt _ =
+  and dump_double d fmt r =
     let t = Double in
       if Tags.mem t tags then
 	fprintf fmt "%e" d
       else
-	fprintf fmt "%s" (tag_abbr t)
+	fprintf fmt "%s" (tag_abbr t r)
 
   and dump_block ~depth t fmt r =
     try
       fprintf fmt "@@%s" (HT.find dumped_blocks r)
     with Not_found -> begin
-      let is_cons = tag r = 0 && size r = 2 in
-      let id =
-	let n = HT.length dumped_blocks in
-	  if t = Block then
-	    if is_cons then
-	      sprintf ">%X<" n
-	    else
-	      sprintf "B%d/%X" (tag r) n
-	  else
-	    sprintf "%s/%X" (tag_abbr t) n
-      in
+      let id = make_id (tag_abbr t r) in
 	if depth < max_depth then begin
 	  HT.add dumped_blocks r id;
 	  if Tags.mem t tags then
-	    if is_cons then begin
-	      dump_aux ~depth fmt (field r 0);
-	      fprintf fmt "@ %s@ " id;
-	      dump_aux ~depth fmt (field r 1)
-	    end else begin
+	    begin
 	      fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
 	      for i = 0 to size r - 1 do
 		fprintf fmt "@ ";
@@ -194,10 +192,7 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 	      fprintf fmt "@,)@]"
 	    end
 	  else
-	    if is_cons then
-	      fprintf fmt "%s" id
-	    else
-	      fprintf fmt "%s:#%d" id (size r)
+	    fprintf fmt "%s:#%d" id (size r)
 	end else begin
 	  fprintf fmt "@@%s" id;
 	  Queue.add r wave
@@ -209,7 +204,7 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
       try
 	fprintf fmt "@@%s" (HT.find dumped_blocks r)
       with Not_found -> begin
-	let id = sprintf "%s/%X" (tag_abbr t) (HT.length dumped_blocks) in
+	let id = make_id (tag_abbr t r) in
 	  HT.add dumped_blocks r id;
 	  if Tags.mem t tags then begin
 	    fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
@@ -225,23 +220,23 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
   and dump_abstract fmt r =
     let t = Abstract in
       if Tags.mem t tags then
-	fprintf fmt "%s:0x%X" (tag_abbr t) (addr r)
+	fprintf fmt "%s:0x%nX" (tag_abbr t r) (addr r)
       else
-	fprintf fmt "%s" (tag_abbr t)
+	fprintf fmt "%s" (tag_abbr t r)
 
   and dump_custom fmt r =
     let t = Abstract in
       if Tags.mem t tags then
-	fprintf fmt "%s:0x%X" (tag_abbr t) (custom_id r)
+	fprintf fmt "%s:0x%nX" (tag_abbr t r) (custom_id r)
       else
-	fprintf fmt "%s" (tag_abbr t)
+	fprintf fmt "%s" (tag_abbr t r)
 
-  and dump_string s fmt _ =
+  and dump_string s fmt r =
     let t = String in
       if Tags.mem t tags then
 	fprintf fmt "\"%s\"" s
       else
-	fprintf fmt "%s:#%d" (tag_abbr t) (String.length s)
+	fprintf fmt "%s:#%d" (tag_abbr t r) (String.length s)
 
   and dump_aux ~depth fmt r =
     match tag_of_value r with
@@ -297,8 +292,8 @@ and dot_to_file path o =
 
 and dot_with_formatter ?(tags=Tags.all) fmt r =
   let dotted = HT.create 31337 in
-  let dotted_make_id name r =
-    let id = sprintf "%s_%d" name (HT.length dotted) in
+  let dotted_make_id abbr r =
+    let id = sprintf "%s_%d" abbr (HT.length dotted) in
       HT.add dotted r id;
       id
   in
@@ -350,7 +345,7 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
     attr_close fmt ()
 
   and dot_block t fmt r =
-    let abbr = tag_abbr t in
+    let abbr = tag_abbr t r in
     let label =
       if t = Block then
 	sprintf "%s%d" abbr (tag r)
@@ -391,33 +386,33 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
       Dot_node id
 
   and dot_abstract fmt r =
-    let abbr = tag_abbr Abstract in
+    let abbr = tag_abbr Abstract r in
       dot_generic abbr abbr fmt r
 
   and dot_string s fmt r =
-    let abbr = tag_abbr String in
+    let abbr = tag_abbr String r in
       dot_generic abbr s fmt r
 
   and dot_double d fmt r =
-    let abbr = tag_abbr Double in
+    let abbr = tag_abbr Double r in
       dot_generic abbr (sprintf "%f" d) fmt r
 
   and dot_double_array a fmt r =
-    let abbr = tag_abbr Double_array in
+    let abbr = tag_abbr Double_array r in
       dot_generic abbr (sprintf "%s #%d" abbr (Array.length a)) fmt r
 
   and dot_custom fmt r =
-    let abbr = tag_abbr Custom in
-      dot_generic abbr (sprintf "%s 0x%X" abbr (custom_id r)) fmt r
+    let abbr = tag_abbr Custom r in
+      dot_generic abbr (sprintf "%s 0x%nX" abbr (custom_id r)) fmt r
 
   and dot_int i fmt r =
     Dot_label (sprintf "%d" i)
 
   and dot_out_of_heap a fmt r =
-    Dot_label (sprintf "0x%X" a)
+    Dot_label (sprintf "0x%nX" a)
 
   and dot_unaligned a fmt r =
-    Dot_label (sprintf "0x%X" a)
+    Dot_label (sprintf "0x%nX" a)
 
   in
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
