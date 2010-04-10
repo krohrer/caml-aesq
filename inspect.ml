@@ -12,8 +12,6 @@ end
 
 module HT = Hashtbl.Make(ValueRepr)
 
-open ExtList
-
 let addr r = magic r lsl 1
   (* according to ${OCAMLSRC}/byterun/mlvalues.h, integers always have
      the LSB set, and only the upper (Sys.word_size - 1) bits are used
@@ -22,8 +20,17 @@ let addr r = magic r lsl 1
      bit-pattern (or address) of the value, we therefore have to
      left-shift by 1. *)
 
+let custom_id r =
+  assert (tag r = custom_tag);
+  (* According to ${OCAMLSRC}/byterun/custom.h, the first field is a
+     pointer to a C-string that identifies the custom value. As KMR
+     can not think of a way to convert C-strings to OCaml strings
+     (without a detour to the world of C), we simply return the
+     address instead. *)
+  addr (field r 0)
+
 let fail_unknown_value x =
-  failwith (Printf.sprintf "OCaml value with unknown tag = %d" x)
+  failwith (sprintf "OCaml value with unknown tag = %d" x)
 
 (*------------------------------------*)
 
@@ -54,7 +61,7 @@ struct
   include Set.Make(TagType)
 
   let of_list tlist =
-    List.fold_right add tlist empty
+    List.fold_left (fun s t -> add t s) empty tlist
 
   let all =
     of_list [
@@ -110,31 +117,31 @@ and dump_to_string ?tags ?max_depth o =
 
 and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
   let dumped_blocks = HT.create 31337 in
-  let postponed_blocks = Queue.create () in
+  let wave = Queue.create () in
   let indentation_for_string id = 2 (* String.length id + 2 *) in
 
-  let rec dump_int fmt i = 
+  let rec dump_int i fmt _ = 
     let t = Int in
       if Tags.mem t tags then
 	fprintf fmt "%d" i
       else
 	fprintf fmt "%s" (tag_abbr t)
 
-  and dump_out_of_heap fmt a =
+  and dump_out_of_heap a fmt _ =
     let t = Out_of_heap in
       if Tags.mem t tags then
 	fprintf fmt "0x%X!" a
       else
 	fprintf fmt "%s" (tag_abbr t)
 
-  and dump_unaligned fmt a =
+  and dump_unaligned a fmt _ =
     let t = Unaligned in
       if Tags.mem t tags then
 	fprintf fmt "0x%X?" a
       else
 	fprintf fmt "%s" (tag_abbr t)
 
-  and dump_double fmt d =
+  and dump_double d fmt _ =
     let t = Double in
       if Tags.mem t tags then
 	fprintf fmt "%e" d
@@ -178,7 +185,7 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 	      fprintf fmt "%s:#%d" id (size r)
 	end else begin
 	  fprintf fmt "@@%s" id;
-	  Queue.add r postponed_blocks
+	  Queue.add r wave
 	end
     end
 
@@ -193,7 +200,7 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 	    fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
 	    for i = 0 to Array.length a - 1 do
 	      fprintf fmt "@ ";
-	      dump_double fmt a.(i)
+	      dump_double a.(i) fmt r
 	    done;
 	    fprintf fmt "@,)@]"
 	  end else
@@ -208,17 +215,13 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
 	fprintf fmt "%s" (tag_abbr t)
 
   and dump_custom fmt r =
-    (* According to ${OCAMLSRC}/byterun/custom.h, the first
-       field is a pointer to a c-string that identifies the
-       custom value. As we cannot directly print strings, we
-       print the address of the identifier instead. *)
     let t = Abstract in
       if Tags.mem t tags then
-	fprintf fmt "%s:0x%X" (tag_abbr t) (addr (field r 0))
+	fprintf fmt "%s:0x%X" (tag_abbr t) (custom_id r)
       else
 	fprintf fmt "%s" (tag_abbr t)
 
-  and dump_string fmt s =
+  and dump_string s fmt _ =
     let t = String in
       if Tags.mem t tags then
 	fprintf fmt "\"%s\"" s
@@ -242,34 +245,184 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
       | x when x = abstract_tag ->
 	  dump_abstract fmt r
       | x when x = string_tag ->
-	  dump_string fmt (magic r)
+	  dump_string (magic r) fmt r
       | x when x = double_tag ->
-	  dump_double fmt (magic r)
+	  dump_double (magic r) fmt r
       | x when x = double_array_tag ->
 	  dump_double_array (magic r) fmt r
       | x when x = custom_tag ->
 	  dump_custom fmt r
 	    (* | x when x = final_tag -> () (* Same as custom_tag *) *)
       | x when x = int_tag ->
-	  dump_int fmt (magic r)
+	  dump_int (magic r) fmt r
       | x when x = out_of_heap_tag ->
-	  dump_out_of_heap fmt (addr r)
+	  dump_out_of_heap (addr r) fmt r
       | x when x = unaligned_tag ->
-	  dump_unaligned fmt (addr r)
+	  dump_unaligned (addr r) fmt r
       | x ->
 	  fail_unknown_value x
   in
     fprintf fmt "@[";
     dump_aux ~depth:0 fmt (repr o);
     fprintf fmt "@]@,";
-    while not (Queue.is_empty postponed_blocks) do
-      let r = Queue.take postponed_blocks in
+    while not (Queue.is_empty wave) do
+      let r = Queue.take wave in
 	if not (HT.mem dumped_blocks r) then begin
 	  fprintf fmt "@[";
 	  dump_aux ~depth:0 fmt r;
 	  fprintf fmt "@]@,";
 	end
     done
+
+(*----------------------------------------------------------------------------*)
+
+let rec dot o =
+  dot_with_formatter std_formatter (repr o)
+
+and dot_with_formatter ?(tags=Tags.all) fmt r =
+  let dotted = HT.create 31337 in
+  let dotted_make_id name r =
+    let id = sprintf "%s_%d" name (HT.length dotted) in
+      HT.add dotted r id;
+      id
+  in
+  (* let buffer = Buffer.create 80 in *)
+  (* let bprintf fmt = bprintf buffer fmt in *)
+  (* let bcontents () = *)
+  (*   let c = Buffer.contents buffer in *)
+  (*     Buffer.clear buffer; *)
+  (*     c *)
+  (* in *)
+  let rec dot fmt r = 
+    match tag r with
+      | x when x = lazy_tag ->
+	  dot_block Lazy fmt r
+      | x when x = closure_tag ->
+	  dot_block Closure fmt r
+      | x when x = object_tag ->
+	  dot_block Object fmt r
+      | x when x = infix_tag ->
+	  dot_block Infix fmt r
+      | x when x = forward_tag ->
+	  dot_block Forward fmt r
+      | x when x < no_scan_tag ->
+	  dot_block Block fmt r
+      | x when x = abstract_tag ->
+	  dot_abstract fmt r
+      | x when x = string_tag ->
+	  dot_string (magic r) fmt r
+      | x when x = double_tag ->
+	  dot_double (magic r) fmt r
+      | x when x = double_array_tag ->
+	  dot_double_array (magic r) fmt r
+      | x when x = custom_tag ->
+	  dot_custom fmt r
+	    (* | x when x = final_tag -> () (* Same as custom_tag *) *)
+      | x when x = int_tag ->
+	  dot_int (magic r) fmt r
+      | x when x = out_of_heap_tag ->
+	  dot_out_of_heap (addr r) fmt r
+      | x when x = unaligned_tag ->
+	  dot_unaligned (addr r) fmt r
+      | x ->
+	  fail_unknown_value x
+
+  and node_open fmt id =
+    fprintf fmt "@[<2>%s@ [" id
+
+  and node_close fmt () =
+    fprintf fmt "];@]@,"
+
+  and link_open fmt id fid =
+    fprintf fmt "@[<2>%s ->@ %s@ [" id fid
+
+  and link_close fmt () = 
+    fprintf fmt "];@]@,"
+
+  and attr_open fmt name =
+    fprintf fmt "@[<h>%s = \"" name
+
+  (* and attr_sep fmt sep = *)
+  (*   fprintf fmt "\", " *)
+
+  and attr_close fmt () =
+    fprintf fmt "\"@]"
+
+  and attr_label fmt s =
+    attr_open fmt "label";
+    fprintf fmt "%s" s;
+    attr_close fmt ()
+
+  and dot_block t fmt r =
+    let abbr = tag_abbr t in
+    let id =
+      if t = Block then
+	dotted_make_id (sprintf "%s%d" abbr (tag r)) r
+      else
+	dotted_make_id abbr r
+    in
+    let n = size r in
+    let field_ids = Array.make n "" in
+      for i = 0 to n - 1 do
+	let fid = dot fmt (field r i) in
+	  link_open fmt (sprintf "%s:f%d" id i) fid;
+	  link_close fmt ();
+	  field_ids.(i) <- fid
+      done;
+      node_open fmt id;
+      attr_open fmt "label";
+      fprintf fmt "%s" abbr;
+      for i = 0 to n - 1 do
+	fprintf fmt " |<f%d> %d" i i
+      done;
+      attr_close fmt ();
+      node_close fmt ();
+      id
+
+  and dot_generic abbr label fmt r=
+    let id = dotted_make_id abbr r in
+      node_open fmt id;
+      attr_label fmt abbr;
+      node_close fmt ();
+      id
+
+  and dot_abstract fmt r =
+    let abbr = tag_abbr Abstract in
+      dot_generic abbr abbr fmt r
+
+  and dot_string s fmt r =
+    let abbr = tag_abbr String in
+      dot_generic abbr s fmt r
+
+  and dot_double d fmt r =
+    let abbr = tag_abbr Double in
+      dot_generic abbr (sprintf "%f" d) fmt r
+
+  and dot_double_array a fmt r =
+    let abbr = tag_abbr Double_array in
+      dot_generic abbr (sprintf "%s #%d" abbr (Array.length a)) fmt r
+
+  and dot_custom fmt r =
+    let abbr = tag_abbr Custom in
+      dot_generic abbr (sprintf "%s 0x%X" abbr (custom_id r)) fmt r
+
+  and dot_int i fmt r =
+    let abbr = tag_abbr Int in
+      dot_generic abbr (sprintf "%d" i) fmt r
+
+  and dot_out_of_heap a fmt r =
+    let abbr = tag_abbr Out_of_heap in
+      dot_generic abbr (sprintf "0x%X" a) fmt r
+
+  and dot_unaligned a fmt r =
+    let abbr = tag_abbr Unaligned in
+      dot_generic abbr (sprintf "0x%X" a) fmt r
+
+  in
+    fprintf fmt "@[<v>digraph {@[<v 2>@,";
+    ignore (dot fmt r);
+    fprintf fmt "@]@,}@]";
+    pp_print_newline fmt ()
 
 (*----------------------------------------------------------------------------*)
 

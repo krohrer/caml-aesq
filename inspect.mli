@@ -23,6 +23,8 @@ module Tags : sig
   val of_list : tag list -> t
 end
 
+val dot : 'a -> unit
+
 val dump : ?tags:Tags.t -> ?max_depth:int -> 'a -> unit
 
 val dump_to_string : ?tags:Tags.t -> ?max_depth:int -> 'a -> string
@@ -30,9 +32,5 @@ val dump_to_string : ?tags:Tags.t -> ?max_depth:int -> 'a -> string
 val dump_to_buffer : ?tags:Tags.t -> ?max_depth:int -> Buffer.t -> 'a -> unit
 
 val dump_to_channel : ?tags:Tags.t -> ?max_depth:int -> out_channel -> 'a -> unit
-
-val dot : ?tags:Tags.t -> ?max_depth -> 'a -> unit
-
-val dot_to_channel : ?tags:Tags.t -> ?max_depth:int -> out_channel -> 'a -> unit
 
 val heap_size : ?tags:Tags.t -> ?follow:Tags.t -> 'a -> int
