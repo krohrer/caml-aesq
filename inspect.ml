@@ -117,9 +117,37 @@ let tag_abbr t r =
     | Out_of_heap -> "ADDR"
     | Unaligned -> "ADDR"
 
-let value_abbr r =
-  let t = tag_of_value r in
-    tag_abbr t r
+let value_abbr ?(long=false) t r =
+  let string_max_length = 20 in
+  let string_ellipsis = "..." in
+  let abbr = tag_abbr t r in
+    if long then
+      match t with
+	| Lazy | Forward | Abstract ->
+	    abbr
+	| Double ->
+	    sprintf "%g" (magic r)
+	| Int ->
+	    sprintf "%d" (magic r)
+	| Block | Closure | Object | Infix ->
+	    sprintf "%s[%d]" abbr (size r)
+	| String ->
+	    let s = magic r in
+	      if String.length s > string_max_length then
+		let n = string_max_length - (String.length string_ellipsis) in
+		  String.sub s 0 n ^ string_ellipsis
+	      else
+		s
+	| Double_array -> 
+	    sprintf "%s[%d]" abbr (Array.length (magic r))
+	| Custom ->
+	    sprintf "0x%nX#" (custom_id r)
+	| Out_of_heap ->
+	    sprintf "0x%nX!" (addr r)
+	| Unaligned ->
+	    sprintf "0x%nX?" (addr r)
+    else
+      abbr
 
 (*------------------------------------*)
 
@@ -147,33 +175,18 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
       sprintf "%s/%X" abbr n
   in
 
-  let rec dump_int i fmt r = 
-    let t = Int in
+  let rec dump_aux ~depth fmt r =
+    let t = tag_of_value r in
       if Tags.mem t tags then
-	fprintf fmt "%d" i
+	match t with
+	  | Lazy | Closure | Object | Infix | Forward | Block as x ->
+	      dump_block ~depth x fmt r 
+	  | Double_array as x ->
+	      dump_double_array (magic r) x fmt r
+	  | Abstract | String | Double | Custom | Int | Out_of_heap | Unaligned ->
+	      pp_print_string fmt (value_abbr ~long:true t r)
       else
-	fprintf fmt "%s" (tag_abbr t r)
-
-  and dump_out_of_heap a fmt r =
-    let t = Out_of_heap in
-      if Tags.mem t tags then
-	fprintf fmt "0x%nX!" a
-      else
-	fprintf fmt "%s" (tag_abbr t r)
-
-  and dump_unaligned a fmt r =
-    let t = Unaligned in
-      if Tags.mem t tags then
-	fprintf fmt "0x%nX?" a
-      else
-	fprintf fmt "%s" (tag_abbr t r)
-
-  and dump_double d fmt r =
-    let t = Double in
-      if Tags.mem t tags then
-	fprintf fmt "%e" d
-      else
-	fprintf fmt "%s" (tag_abbr t r)
+	pp_print_string fmt (value_abbr t r)
 
   and dump_block ~depth t fmt r =
     try
@@ -182,82 +195,33 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
       let id = make_id (tag_abbr t r) in
 	if depth < max_depth then begin
 	  HT.add dumped_blocks r id;
-	  if Tags.mem t tags then
-	    begin
-	      fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
-	      for i = 0 to size r - 1 do
-		fprintf fmt "@ ";
-		dump_aux ~depth:(depth + 1) fmt (field r i)
-	      done;
-	      fprintf fmt "@,)@]"
-	    end
-	  else
-	    fprintf fmt "%s:#%d" id (size r)
+	  fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
+	  for i = 0 to size r - 1 do
+	    fprintf fmt "@ ";
+	    dump_aux ~depth:(depth + 1) fmt (field r i)
+	  done;
+	  fprintf fmt "@,)@]"
 	end else begin
 	  fprintf fmt "@@%s" id;
 	  Queue.add r wave
 	end
     end
 
-  and dump_double_array a fmt r =
-    let t = Double_array in
-      try
-	fprintf fmt "@@%s" (HT.find dumped_blocks r)
-      with Not_found -> begin
-	let id = make_id (tag_abbr t r) in
-	  HT.add dumped_blocks r id;
-	  if Tags.mem t tags then begin
-	    fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
-	    for i = 0 to Array.length a - 1 do
-	      fprintf fmt "@ ";
-	      dump_double a.(i) fmt r
-	    done;
-	    fprintf fmt "@,)@]"
-	  end else
-	    fprintf fmt "%s:#%d" id (Array.length a)
-      end
-	
-  and dump_abstract fmt r =
-    let t = Abstract in
-      if Tags.mem t tags then
-	fprintf fmt "%s:0x%nX" (tag_abbr t r) (addr r)
-      else
-	fprintf fmt "%s" (tag_abbr t r)
+  and dump_double_array a t fmt r =
+    try
+      fprintf fmt "@@%s" (HT.find dumped_blocks r)
+    with Not_found -> begin
+      let id = make_id (tag_abbr t r) in
+	HT.add dumped_blocks r id;
+	fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
+	for i = 0 to Array.length a - 1 do
+	  let ai = a.(i) in
+	    fprintf fmt "@ ";
+	    pp_print_string fmt (value_abbr ~long:true (tag_of_value ai) (repr ai))
+	done;
+	fprintf fmt "@,)@]"
+    end
 
-  and dump_custom fmt r =
-    let t = Abstract in
-      if Tags.mem t tags then
-	fprintf fmt "%s:0x%nX" (tag_abbr t r) (custom_id r)
-      else
-	fprintf fmt "%s" (tag_abbr t r)
-
-  and dump_string s fmt r =
-    let t = String in
-      if Tags.mem t tags then
-	fprintf fmt "\"%s\"" s
-      else
-	fprintf fmt "%s:#%d" (tag_abbr t r) (String.length s)
-
-  and dump_aux ~depth fmt r =
-    match tag_of_value r with
-      | Lazy | Closure | Object | Infix | Forward | Block as x ->
-	  dump_block ~depth x fmt r
-      | Abstract ->
-	  dump_abstract fmt r
-      | String ->
-	  dump_string (magic r) fmt r
-      | Double ->
-	  dump_double (magic r) fmt r
-      | Double_array ->
-	  dump_double_array (magic r) fmt r
-      | Custom ->
-	  dump_custom fmt r
-      | Int ->
-	  dump_int (magic r) fmt r
-      | Out_of_heap ->
-	  dump_out_of_heap (addr r) fmt r
-      | Unaligned ->
-	  dump_unaligned (addr r) fmt r
   in
     fprintf fmt "@[";
     dump_aux ~depth:0 fmt (repr o);
