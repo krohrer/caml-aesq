@@ -55,6 +55,8 @@ val dot_osx : ?context:dot_context -> 'a -> bool
 
 val dot_to_file : ?context:dot_context -> string -> 'a -> unit
 
+
+
 val dump : ?context:dump_context -> 'a -> unit
 
 val dump_to_string : ?context:dump_context -> 'a -> string
@@ -63,4 +65,10 @@ val dump_to_buffer : ?context:dump_context -> Buffer.t -> 'a -> unit
 
 val dump_to_channel : ?context:dump_context -> out_channel -> 'a -> unit
 
+
+
 val heap_size : ?tags:Tags.t -> ?follow:Tags.t -> 'a -> int
+
+
+
+val test_data : unit -> Obj.t

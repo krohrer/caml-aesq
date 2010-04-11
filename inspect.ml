@@ -31,12 +31,6 @@ let addr r =
 	 therefore have to make sure that the lower bit is one to make
 	 a proper int of it and then multiply by 2. *)
 
-let custom_id r =
-  assert (tag r = custom_tag);
-  (* According to ${OCAMLSRC}/byterun/custom.h, the first field is a
-     pointer to a C-struct that identifies the type. *)
-  addr (field r 0)
-
 (*------------------------------------*)
 
 type tag =
@@ -105,7 +99,14 @@ let tag_of_value r =
     | x when x = unaligned_tag -> Unaligned
     | x -> failwith (sprintf "OCaml value with unknown tag = %d" x)
 
-let tag_id t r = 
+let size_of_value r =
+  match tag r with
+    | x when x = int_tag || x = out_of_heap_tag || x = unaligned_tag ->
+	0
+    | _ ->
+	size r
+
+let value_mnemonic r t = 
   match t with
     | Lazy -> "LAZY"
     | Closure -> "CLOS"
@@ -119,40 +120,43 @@ let tag_id t r =
     | Double_array -> "DBLA"
     | Custom -> "CUST"
     | Int -> "INT"
-    | Out_of_heap -> "ADDR"
-    | Unaligned -> "ADDR"
+    | Out_of_heap -> "OADR"
+    | Unaligned -> "UADR"
 
-let value_desc ?(long=false) t r =
+let value_unknown =
+  "????"
+
+let value_abbrev r t =
+  match t with
+    | Double | Int | Out_of_heap | Unaligned ->
+	value_mnemonic r t
+    | Lazy | Closure | Object | Infix | Forward | Block | Abstract | Custom ->
+	sprintf "%s:%d" (value_mnemonic r t) (size r)
+    | Double_array ->
+	sprintf "%s:%d" (value_mnemonic r t) (Array.length (magic r))
+    | String ->
+	sprintf "%s:%d" (value_mnemonic r t) (String.length (magic r))
+
+let value_description r t =
   let string_max_length = 8 in
-  let string_ellipsis = ".." in
-  let abbr = tag_id t r in
-    if long then
-      match t with
-	| Lazy | Forward ->
-	    abbr
-	| Double ->
-	    sprintf "%g" (magic r)
-	| Int ->
-	    sprintf "%d" (magic r)
-	| Block | Closure | Object | Infix | Abstract ->
-	    sprintf "%s[%d]" abbr (size r)
-	| String ->
-	    let s = magic r in
-	      if String.length s > string_max_length then
-		let n = string_max_length - (String.length string_ellipsis) in
-		  sprintf "%S%s" (String.sub s 0 n) string_ellipsis
-	      else
-		sprintf "%S" s
-	| Double_array ->
-	    sprintf "%s[%d]" abbr (Array.length (magic r))
-	| Custom ->
-	    sprintf "0x%nX" (custom_id r)
-	| Out_of_heap ->
-	    sprintf "0x%nX" (addr r)
-	| Unaligned ->
-	    sprintf "0x%nX" (addr r)
-    else
-      abbr
+    match t with
+      | Lazy | Forward ->
+	  value_mnemonic r t
+      | Double ->
+	  string_of_float (magic r)
+      | Int ->
+	  string_of_int (magic r)
+      | Out_of_heap | Unaligned ->
+	  sprintf "0x%nX" (addr r)
+      | Custom | Block | Closure | Object | Infix | Abstract | Double_array ->
+	  value_abbrev r t
+      | String ->
+	  let s = magic r in
+	  let l = String.length s in
+	    if l > string_max_length then
+		sprintf "%S" (String.sub s 0 string_max_length ^ "[..]")
+	    else
+	      sprintf "%S" s
 
 (*----------------------------------------------------------------------------*)
 
@@ -177,6 +181,58 @@ object
   method max_depth : int
 end
 
+let colors_orrd8 =
+  [|
+    "#fff7ec";
+    "#fee8c8";
+    "#fdd49e";
+    "#fdbb84";
+    "#fc8d59";
+    "#ef6548";
+    "#d7301f";
+    "#990000";
+  |]
+
+let colors_ylorrd8 =
+  [|
+    "#ffffcc";
+    "#ffeda0";
+    "#fed976";
+    "#feb24c";
+    "#fd8d3c";
+    "#fc4e2a";
+    "#e31a1c";
+    "#b10026";
+  |]
+
+let attrs_with_fillcolor_for_size size attrs =
+  let scheme = colors_orrd8 in
+  let n = Array.length scheme in
+  let i = int_of_float (log (float_of_int (size + 1)) /. log 10.) in
+  let i = min (max 0 i) (n - 1) in
+    ("fillcolor", scheme.(i)) :: attrs
+
+let attrs_with_color_for_tag t attrs =
+  match t with
+    | Lazy
+    | Closure
+
+    | Infix
+    | Forward
+
+    | Object
+    | Block
+    | Double_array
+
+    | Abstract
+    | String
+    | Double
+    | Custom
+
+    | Int
+    | Out_of_heap
+    | Unaligned -> attrs
+
 let default_dot_context =
 object
   method graph_attrs =
@@ -186,32 +242,25 @@ object
       "overlap", "false";
       "sep", "0.1"
     ]
+
   method all_nodes_attrs =
     [
       "shape", "record";
-      "style", "rounded"
+      "style", "rounded, filled"
     ]
+
   method all_edges_attrs =
     [
       "dir", "both";
       "arrowtail", "odot"
     ]
+
   method node_attrs ?(root=false) ~size label t =
     let attrs = 
-      ("label", label) :: (
-	if root then
-	  [
-	    "penwidth", "3.0";
-	  ]
-	else
-	  []
-      )
+      if root then [ "penwidth", "4.0" ] else []
     in
-      match t with
-	| String ->
-	    ("color", "green"):: attrs
-	| x ->
-	    attrs
+    let attrs = ("label", label) :: attrs in
+      attrs_with_fillcolor_for_size size attrs
 
   method edge_attrs ~field st dt =
     [ "label", string_of_int field ]
@@ -253,7 +302,7 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
       id_find r
     with Not_found -> (
       let t = tag_of_value r in
-      let tid = tag_id t r in
+      let tid = value_mnemonic r t in
       let n = HT.length value2id in
       let id = sprintf "%s/%X" tid n in
 	HT.add value2id r id;
@@ -263,7 +312,7 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
     HT.find value2id r
   in
 
-  let sexpr_open fmt id =
+  let rec sexpr_open fmt id =
     fprintf fmt "@[<hv %d>(%s" (indentation_for_string id) id
 
   and sexpr_close fmt () =
@@ -274,57 +323,68 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
 
   and sexpr_ref fmt id =
     fprintf fmt "@@%s" id
+
+  and sexpr_value_description fmt r t =
+    pp_print_string fmt (value_description r t)
+
+  and sexpr_value_mnemonic fmt r t =
+    pp_print_string fmt (value_mnemonic r t)
   in
 
   let rec sexpr_value ~depth fmt r =
     let t = tag_of_value r in
-    let long = context#should_expand t in
+    let expand = context#should_expand t in
       match t with
-	| Int | Out_of_heap | Unaligned ->
-	    pp_print_string fmt (value_desc ~long t r)
-	| x when long ->
-	    sexpr_block ~depth t fmt r
+	| Lazy | Closure | Object | Infix | Forward | Block when expand ->
+	    sexpr_block ~depth fmt r t sexpr_block_body
+	| Abstract | Custom | Double when expand ->
+	    sexpr_block ~depth fmt r t sexpr_description_body
+	| Double_array when expand ->
+	    sexpr_block ~depth fmt r t sexpr_double_array_body
+	| x when expand ->
+	    sexpr_value_description fmt r t
 	| x ->
-	    pp_print_string fmt (value_desc ~long t r)
+	    sexpr_value_mnemonic fmt r t
 
-  and sexpr_block ~depth t fmt r =
+  and sexpr_block ~depth fmt r t body =
     try
       sexpr_ref fmt (id_find r)
     with Not_found -> (
       let id = id_of_value r in
 	if depth <= context#max_depth then (
 	  sexpr_open fmt id;
-	  sexpr_block_body ~depth t fmt r;
+	  body ~depth fmt r t;
 	  sexpr_close fmt ()
 	) else if context#max_depth > 0 then (
 	  (* Postpone *)
 	  sexpr_ref fmt id;
 	  Queue.push r queue
 	)
+	else (
+	  (* Cant print with max_depth < 0 *)
+	)
     )
 
-  and sexpr_block_body ~depth t fmt r =
-    match t with
-      | _ when tag r < no_scan_tag ->
-	  let n = size r in
-	    for i = 0 to n - 1 do
-	      sexpr_sep fmt ();
-	      sexpr_value ~depth:(depth + 1) fmt (field r i)
-	    done
-      | Double ->
-	  sexpr_sep fmt ();
-	  fprintf fmt "%g" (magic r)
-      | Double_array ->
-	  let a = magic r in
-	    for i = 0 to Array.length a - 1 do
-	      sexpr_sep fmt ();
-	      fprintf fmt "%g" a.(i)
-	    done
-      | Custom ->
-	  sexpr_sep fmt ();
-	  fprintf fmt "0x%nX" (custom_id r)
-      | _ ->
-	  ()
+  and sexpr_block_body ~depth fmt r _ =
+    assert (tag r < no_scan_tag);
+    let n = size r in
+      for i = 0 to n - 1 do
+	sexpr_sep fmt ();
+	sexpr_value ~depth:(depth + 1) fmt (field r i)
+      done
+
+  and sexpr_description_body ~depth fmt r t =
+    sexpr_sep fmt ();
+    sexpr_value_description fmt r t
+
+  and sexpr_double_array_body ~depth fmt r _ =
+    assert (tag r = double_array_tag);
+    let a = magic r in
+    let n = Array.length a in
+      for i = 0 to n - 1 do
+	sexpr_sep fmt ();
+	sexpr_description_body ~depth fmt a.(i) Double
+      done
   in
 
   let values = "DUMP" in
@@ -375,7 +435,7 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   and id_of_value r =
     try id_find r with Not_found -> (
       let t = tag_of_value r in
-      let id = sprintf "%s_%d" (tag_id t r) (HT.length value2id) in
+      let id = sprintf "%s_%d" (value_mnemonic r t) (HT.length value2id) in
 	HT.add value2id r id;
 	id
     )
@@ -426,51 +486,68 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   in
 
   let value_to_label_and_links id t r =
-    let n = if tag r < no_scan_tag then size r else 0 in
-    let links = ref [] in
-    let rec iter b i =
-      if i < n then (
-	let f = field r i in
-	let x = tag_of_value f in
-	let max_size = context#max_size in
-	let long = context#should_expand_node ~size:n x in
-	  (
-	    match x with
-	      | Int | Out_of_heap | Unaligned ->
-		  ()
-	      | _ -> (
-		  if long && context#should_follow_edge ~field:i t x then (
-		    let fid =
-		      try id_find f with Not_found ->
-			Queue.push f queue;
-			id_of_value f
-		    in
-		      links := (id, t, i, fid, x) :: !links;
-		  )
-		)
-	  );
-	  if i < max_size then (
-	    let desc = value_desc ~long x f in
-	      bprintf b "| %s" desc
-	  )
-	  else if i = max_size && 0 <= max_size then (
-	    bprintf b "| ..."
-	  )
-	  else (
-	    ()
-	  );
-	  iter b (i + 1)
-      )
-      else
-	()
-    in
+    (* TODO : Generate labels first, then collect links. *)
+    let n = size_of_value r in
+    let max_size = context#max_size in
+    let expand = context#should_expand_node ~size:n t in
     let bprint b =
-      let desc = value_desc ~long:true t r in
-	bprintf b "<hd> %s" desc;
-	iter b 0
+      Buffer.add_string b (value_abbrev r t);
+      match t with
+	| _ when tag r < no_scan_tag && expand ->
+	    for i = 0 to min max_size (n - 1) do
+	      if i < max_size then
+		let f = field r i in
+		let x = tag_of_value f in
+		let desc = value_description f x in
+		  bprintf b "| %s" desc
+	      else
+		bprintf b "| ...";
+	    done
+	| Double_array when expand ->
+	    assert (tag r = double_array_tag);
+	    let a = magic r in
+	    let n = Array.length a in
+	      for i = 0 to min max_size (n - 1) do
+		if i < max_size then
+		  bprintf b "| %s" (value_description a.(i) Double)
+		else (
+		  bprintf b "| ...";
+		)
+	      done
+	| Abstract when expand ->
+	    for i = 0 to min max_size (n - 1) do
+	      if i < max_size then
+		bprintf b "| %s" value_unknown
+	      else
+		bprintf b "| ..."
+	    done
+	| _ ->
+	    ()
     in
-    let label = strbuf bprint in
-      (label, !links)
+    let links =
+      if tag r < no_scan_tag && expand then
+	let rl = ref [] in
+	  for i = 0 to n - 1 do
+	    let f = field r i in
+	    let x = tag_of_value f in
+	      match x with 
+		| Int | Out_of_heap | Unaligned ->
+		    ()
+		| _ when context#should_follow_edge ~field:i t x ->
+		  let fid =
+		    try id_find f with Not_found ->
+		      Queue.push f queue;
+		      id_of_value f
+		  in
+		    rl := (id, t, i, fid, x) :: !rl
+		| _ ->
+		    ()
+	  done;
+	  !rl
+      else
+	[]
+    in
+      strbuf bprint, links
   in
 
   let rec value_one ?(root=false) fmt id r =
@@ -485,12 +562,12 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
       node_one fmt id node_attrs;
       List.iter aux links
   in
-    
+  let root_id = id_of_value r in
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
-    node_one fmt "graph" context#graph_attrs;
+    node_one fmt "graph" (("root", root_id) :: context#graph_attrs);
     node_one fmt "node" context#all_nodes_attrs;
     node_one fmt "edge" context#all_edges_attrs;
-    value_one ~root:true fmt (id_of_value r) r;
+    value_one ~root:true fmt root_id r;
     while not (Queue.is_empty queue) do
       let r = Queue.pop queue in
 	value_one fmt (id_of_value r) r
@@ -547,5 +624,30 @@ let heap_size ?(tags=Tags.all) ?(follow=Tags.all) o =
 	      ()
     done;
     !bytes
+
+(*----------------------------------------------------------------------------*)
+
+let test_data () =
+  let rec l = 1 :: 2 :: 3 :: 4 :: 5 :: 6 :: 7 :: l in
+  let rec drop l i =
+    if i = 0 then
+      l
+    else
+      drop (List.tl l) (i - 1)
+  in
+  let rec f x =
+    l
+  and g y =
+    f (y :: l)
+  in
+  let data = 
+    (l, (1,2), [|3; 4|], flush, 1.0, [|2.0; 3.0|],
+     (Tags.all, Tags.remove Closure Tags.all),
+     ("Hello world", lazy (3 + 5)), g, f, ("STRING", "STRING"),
+     Array.init 20 (drop l),
+     stdout,
+    [Array.make 10 0; Array.make 100 0; Array.make 1000 0; Array.make 1000000 0; Array.make 10000000 0])
+  in
+    repr data
 
 (*----------------------------------------------------------------------------*)
