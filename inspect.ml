@@ -26,10 +26,7 @@ let addr r =
 let custom_id r =
   assert (tag r = custom_tag);
   (* According to ${OCAMLSRC}/byterun/custom.h, the first field is a
-     pointer to a C-string that identifies the custom value. As KMR
-     can not think of a way to convert C-strings to OCaml strings
-     (without a detour to the world of C), we simply return the
-     address instead. *)
+     pointer to a C-struct that identifies the type. *)
   addr (field r 0)
 
 (*------------------------------------*)
@@ -100,7 +97,7 @@ let tag_of_value r =
     | x when x = unaligned_tag -> Unaligned
     | x -> failwith (sprintf "OCaml value with unknown tag = %d" x)
 
-let tag_abbr t r = 
+let tag_id t r = 
   match t with
     | Lazy -> "LAZY"
     | Closure -> "CLOS"
@@ -117,25 +114,25 @@ let tag_abbr t r =
     | Out_of_heap -> "ADDR"
     | Unaligned -> "ADDR"
 
-let value_abbr ?(long=false) t r =
-  let string_max_length = 20 in
-  let string_ellipsis = "..." in
-  let abbr = tag_abbr t r in
+let value_desc ?(long=false) t r =
+  let string_max_length = 8 in
+  let string_ellipsis = ".." in
+  let abbr = tag_id t r in
     if long then
       match t with
-	| Lazy | Forward | Abstract ->
+	| Lazy | Forward ->
 	    abbr
 	| Double ->
 	    sprintf "%g" (magic r)
 	| Int ->
 	    sprintf "%d" (magic r)
-	| Block | Closure | Object | Infix ->
+	| Block | Closure | Object | Infix | Abstract ->
 	    sprintf "%s[%d]" abbr (size r)
 	| String ->
 	    let s = magic r in
 	      if String.length s > string_max_length then
 		let n = string_max_length - (String.length string_ellipsis) in
-		  String.sub s 0 n ^ string_ellipsis
+		  sprintf "%S%s" (String.sub s 0 n) string_ellipsis
 	      else
 		s
 	| Double_array -> 
@@ -149,7 +146,7 @@ let value_abbr ?(long=false) t r =
     else
       abbr
 
-(*------------------------------------*)
+(*----------------------------------------------------------------------------*)
 
 let rec dump ?tags ?max_depth o =
   dump_with_formatter ?tags ?max_depth std_formatter (repr o)
@@ -165,122 +162,140 @@ and dump_to_string ?tags ?max_depth o =
     dump_to_buffer ?tags ?max_depth b o;
     Buffer.contents b
 
-and dump_with_formatter ?(tags=Tags.all) ?(max_depth=30) fmt o =
-  let dumped_blocks = HT.create 31337 in
+and dump_with_formatter ?(tags=Tags.all) ?(max_depth=20) fmt o =
+  let value2id = HT.create 31337 in
   let wave = Queue.create () in
   let indentation_for_string id = 2 (* String.length id + 2 *) in
 
-  let make_id abbr =
-    let n = HT.length dumped_blocks in
-      sprintf "%s/%X" abbr n
+  let make_id r =
+    let t = tag_of_value r in
+    let tid = tag_id t r in
+    let n = HT.length value2id in
+    let id = sprintf "%s-%X" tid n in
+      HT.add value2id r id;
+      id
+
+  and find_id r =
+    HT.find value2id r
   in
 
-  let rec dump_aux ~depth fmt r =
+  let sexpr_open fmt id =
+    fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id
+
+  and sexpr_close fmt () =
+    fprintf fmt ")@,@]"
+
+  and sexpr_sep fmt () =
+    fprintf fmt "@ "
+
+  and sexpr_ref fmt id =
+    fprintf fmt "@@%s" id
+  in
+
+  let rec sexpr_value ~depth fmt r =
     let t = tag_of_value r in
-      if Tags.mem t tags then
-	match t with
-	  | Lazy | Closure | Object | Infix | Forward | Block as x ->
-	      dump_block ~depth x fmt r 
-	  | Double_array as x ->
-	      dump_double_array (magic r) x fmt r
-	  | Abstract | String | Double | Custom | Int | Out_of_heap | Unaligned ->
-	      pp_print_string fmt (value_abbr ~long:true t r)
-      else
-	pp_print_string fmt (value_abbr t r)
+      match t with
+	| Lazy | Closure | Object | Infix | Forward | Block as x when Tags.mem x tags ->
+	    sexpr_block ~depth fmt r
+	| Double_array as x when Tags.mem x tags ->
+	    sexpr_double_array (magic r) fmt r
+	| String as x when Tags.mem x tags ->
+	    fprintf fmt "%S" (magic r)
+	| x ->
+	    let long = Tags.mem x tags in
+	    let desc = value_desc ~long t r in
+	      pp_print_string fmt desc
 
-  and dump_block ~depth t fmt r =
+  and sexpr_block ~depth fmt r =
     try
-      fprintf fmt "@@%s" (HT.find dumped_blocks r)
-    with Not_found -> begin
-      let id = make_id (tag_abbr t r) in
-	if depth < max_depth then begin
-	  HT.add dumped_blocks r id;
-	  fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
-	  for i = 0 to size r - 1 do
-	    fprintf fmt "@ ";
-	    dump_aux ~depth:(depth + 1) fmt (field r i)
-	  done;
-	  fprintf fmt "@,)@]"
-	end else begin
-	  fprintf fmt "@@%s" id;
-	  Queue.add r wave
-	end
-    end
+      sexpr_ref fmt (find_id r)
+    with Not_found -> (
+      let id = make_id r in
+	if depth < max_depth then (
+	  let n = size r in
+	    sexpr_open fmt id;
+	    for i = 0 to n - 1 do
+	      sexpr_sep fmt ();
+	      sexpr_value ~depth:(depth + 1) fmt (field r i)
+	    done;
+	    sexpr_close fmt ()
+	) else (
+	  (* Postpone *)
+	  sexpr_ref fmt id;
+	  Queue.push r wave
+	)
+    )
 
-  and dump_double_array a t fmt r =
+  and sexpr_double_array a fmt r =
     try
-      fprintf fmt "@@%s" (HT.find dumped_blocks r)
-    with Not_found -> begin
-      let id = make_id (tag_abbr t r) in
-	HT.add dumped_blocks r id;
-	fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id;
+      sexpr_ref fmt (find_id r)
+    with Not_found -> (
+      let id = make_id r in
+	sexpr_open fmt id;
 	for i = 0 to Array.length a - 1 do
 	  let ai = a.(i) in
-	    fprintf fmt "@ ";
-	    pp_print_string fmt (value_abbr ~long:true (tag_of_value ai) (repr ai))
+	  let desc = value_desc ~long:true (tag_of_value ai) (repr ai) in
+	    sexpr_sep fmt ();
+	    pp_print_string fmt desc;
 	done;
-	fprintf fmt "@,)@]"
-    end
+	sexpr_close fmt ()
+    )
 
   in
-    fprintf fmt "@[";
-    dump_aux ~depth:0 fmt (repr o);
-    fprintf fmt "@]@,";
+  let values = "DUMP" in
+  let r = repr o in
+    Queue.push r wave;
+    pp_open_vbox fmt 0;
+    sexpr_open fmt values;
     while not (Queue.is_empty wave) do
-      let r = Queue.take wave in
-	if not (HT.mem dumped_blocks r) then begin
-	  fprintf fmt "@[";
-	  dump_aux ~depth:0 fmt r;
-	  fprintf fmt "@]@,";
-	end
-    done
+      let r = Queue.pop wave in
+	sexpr_sep fmt ();
+	sexpr_value ~depth:0 fmt r
+    done;
+    sexpr_close fmt ();
+    pp_close_box fmt ()
 
 (*----------------------------------------------------------------------------*)
 
-type dot =
-  | Dot_node of string
-  | Dot_label of string
+type field =
+  | Field_link of string * string
+  | Field_label of string
 
-let rec dot o =
-  dot_with_formatter std_formatter (repr o)
+let rec dot ?tags ?follow ?max_len o =
+  dot_with_formatter ?tags ?follow std_formatter (repr o)
 
-and dot_to_file path o =
+and dot_to_file ?tags ?follow ?max_len path o =
   let oc = open_out path in
     try
       let fmt = formatter_of_out_channel oc in
-	dot_with_formatter fmt (repr o);
+	dot_with_formatter ?tags ?follow ?max_len fmt (repr o);
 	flush oc;
 	close_out oc
     with
       | _ -> close_out oc
 
-and dot_with_formatter ?(tags=Tags.all) fmt r =
-  let dotted = HT.create 31337 in
-  let dotted_make_id abbr r =
-    let id = sprintf "%s_%d" abbr (HT.length dotted) in
-      HT.add dotted r id;
-      id
-  in
-  let rec dot fmt r =
-    match tag_of_value r with
-      | Lazy | Closure | Object | Infix | Forward | Block as x ->
-	  dot_block x fmt r
-      | Abstract ->
-	  dot_abstract fmt r
-      | String ->
-	  dot_string (magic r) fmt r
-      | Double ->
-	  dot_double (magic r) fmt r
-      | Double_array ->
-	  dot_double_array (magic r) fmt r
-      | Custom ->
-	  dot_custom fmt r
-      | Int ->
-	  dot_int (magic r) fmt r
-      | Out_of_heap ->
-	  dot_out_of_heap (addr r) fmt r
-      | Unaligned ->
-	  dot_unaligned (addr r) fmt r
+and dot_with_formatter ?(tags=Tags.all) ?(follow=Tags.all) ?(max_len=0) fmt r =
+  let value2id = HT.create 31337 in
+  let queue = Queue.create () in
+
+  let rec make_id abbr r =
+    try HT.find value2id r with
+	Not_found ->
+	  let id = sprintf "%s_%d" abbr (HT.length value2id) in
+	    HT.add value2id r id;
+	    Queue.add (id, r) queue;
+	    id
+
+  and make_field t r i =
+    assert (tag r < no_scan_tag);
+    let f = field r i in
+      match tag_of_value f with
+	| Lazy | Closure | Object | Infix | Forward | Block as x when Tags.mem t follow ->
+	    let long = Tags.mem x tags in
+	      Field_link (make_id (tag_id x f) f, value_desc ~long x f)
+	| x ->
+	    let long = Tags.mem x tags in
+	      Field_label (value_desc ~long x f)
 
   and node_open fmt id =
     fprintf fmt "@[<2>%s@ [" id
@@ -288,101 +303,83 @@ and dot_with_formatter ?(tags=Tags.all) fmt r =
   and node_close fmt () =
     fprintf fmt "];@]@,"
 
-  and link_open fmt id fid =
-    fprintf fmt "@[<2>%s ->@ %s@ [" id fid
+  and link_open fmt src dst =
+    fprintf fmt "@[<2>%s ->@ %s@ [" src dst
 
-  and link_close fmt () = 
+  and link_close fmt () =
     fprintf fmt "];@]@,"
 
   and attr_open fmt name =
     fprintf fmt "@[<h>%s = \"" name
 
-  (* and attr_sep fmt sep = *)
-  (*   fprintf fmt "\", " *)
-
   and attr_close fmt () =
-    fprintf fmt "\"@]"
+    fprintf fmt "\",@]@ "
 
   and attr_label fmt s =
     attr_open fmt "label";
     fprintf fmt "%s" s;
     attr_close fmt ()
+  in
 
-  and dot_block t fmt r =
-    let abbr = tag_abbr t r in
-    let label =
-      if t = Block then
-	sprintf "%s%d" abbr (tag r)
-      else
-	abbr
-    in
-    let id = dotted_make_id label r in
-    let n = size r in
-    let fields =
-      Array.init n (fun i -> dot fmt (field r i))
-    in
-      Array.iteri
-	(fun i n -> match n with
-	   | Dot_node fid ->
-	       link_open fmt (sprintf "%s:f%d" id i) fid;
-	       link_close fmt ()
-	   | Dot_label _ -> ())
-	fields;
-      node_open fmt id;
-      attr_open fmt "label";
-      fprintf fmt "%s" abbr;
-      Array.iteri
-	(fun i n -> match n with
-	   | Dot_node _ ->
-	       fprintf fmt " |<f%d> %d" i i
-	   | Dot_label l -> 
-	       fprintf fmt " |<f%d> %s" i l)
-	fields;
-      attr_close fmt ();
-      node_close fmt ();
-      Dot_node id
+  let rec dot_node id fmt r =
+    let t = tag_of_value r in
+      match t with
+	| Lazy | Closure | Object | Infix | Forward | Block as x when Tags.mem x tags ->
+	    let n = size r in
+	    let too_long = n > max_len in (* Print more info if fields are cut off *)
+	    let fields = Array.init n (make_field t r) in
+	      node_open fmt id;
+	      attr_open fmt "label";
+	      fprintf fmt "<hd> %s" (value_desc ~long:too_long x r);
+	      Array.iteri dot_label fields;
+	      attr_close fmt ();
+	      node_close fmt ();
+	      Array.iteri (dot_link id) fields
+	| x ->
+	    node_open fmt id;
+	    attr_label fmt (value_desc ~long:true x r);
+	    node_close fmt ()
 
-  and dot_generic abbr label fmt r =
-    let id = dotted_make_id abbr r in
-      node_open fmt id;
-      attr_label fmt abbr;
-      node_close fmt ();
-      Dot_node id
+  and dot_label i f =
+    if i < max_len then
+      match f with
+    	| Field_label l ->
+    	    fprintf fmt "| %s" l
+    	| Field_link (_, l) ->
+    	    fprintf fmt "|<f%d> %s" i l
+    else if i = max_len && 0 < max_len  then
+      fprintf fmt "|<rest> ..."
+    else
+      ()
 
-  and dot_abstract fmt r =
-    let abbr = tag_abbr Abstract r in
-      dot_generic abbr abbr fmt r
-
-  and dot_string s fmt r =
-    let abbr = tag_abbr String r in
-      dot_generic abbr s fmt r
-
-  and dot_double d fmt r =
-    let abbr = tag_abbr Double r in
-      dot_generic abbr (sprintf "%f" d) fmt r
-
-  and dot_double_array a fmt r =
-    let abbr = tag_abbr Double_array r in
-      dot_generic abbr (sprintf "%s #%d" abbr (Array.length a)) fmt r
-
-  and dot_custom fmt r =
-    let abbr = tag_abbr Custom r in
-      dot_generic abbr (sprintf "%s 0x%nX" abbr (custom_id r)) fmt r
-
-  and dot_int i fmt r =
-    Dot_label (sprintf "%d" i)
-
-  and dot_out_of_heap a fmt r =
-    Dot_label (sprintf "0x%nX" a)
-
-  and dot_unaligned a fmt r =
-    Dot_label (sprintf "0x%nX" a)
+  and dot_link id i f =
+      match f with
+	| Field_label _ ->
+	    ()
+	| Field_link (lid, _) ->
+	    let src =
+	      if i < max_len then
+	    	sprintf "%s:f%d" id i
+	      else if 0 < max_len then
+	    	sprintf "%s:rest" id
+	      else
+		id
+	    in
+	    let dst = sprintf "%s" lid in
+	      link_open fmt src dst;
+	      attr_label fmt (string_of_int i);
+	      link_close fmt ()
 
   in
+    ignore (make_id "ROOT" r);
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
+    fprintf fmt "graph [rankdir=LR, splines=true, overlap=false, sep=0.1];@,";
     fprintf fmt "node [shape=record, style=rounded];@,";
-    fprintf fmt "edge [len=3];@,";
-    ignore (dot fmt r);
+    fprintf fmt "edge [dir=both, arrowtail=odot];@,";
+    while not (Queue.is_empty queue) do
+      let id, r = Queue.take queue in
+	dot_node id fmt r
+    done;
     fprintf fmt "@]@,}@]";
     pp_print_newline fmt ()
 
@@ -419,20 +416,18 @@ let heap_size ?(tags=Tags.all) ?(follow=Tags.all) o =
 	match t with
 	  | Lazy | Closure | Object | Infix | Forward | Block as x ->
 	      let n = size r in
-		begin
-		  if Tags.mem x tags then
+		( if Tags.mem x tags then
 		    add_bytes (hdbytes + n*wobytes);
 		  if Tags.mem x follow then
 		    for i = 0 to n - 1 do
 		      add_candidate (field r i)
 		    done
-		end
+		)
 	  | Abstract | String | Double | Double_array | Custom as x->
 	      let n = size r in
-		begin
-		  if Tags.mem x tags then
+		( if Tags.mem x tags then
 		    add_bytes (hdbytes * n*wobytes)
-		end
+		)
 	  | Int | Out_of_heap | Unaligned ->
 	      ()
     done;
