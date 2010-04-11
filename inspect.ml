@@ -303,7 +303,6 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       let t = tag_of_value r in
       let id = sprintf "%s_%d" (tag_id t r) (HT.length value2id) in
 	HT.add value2id r id;
-	Queue.push r queue;
 	id
     )
   and id_find r =
@@ -360,7 +359,11 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
 	let f = field r i in
 	let x = tag_of_value f in
 	  if tag f < no_scan_tag then (
-	    let fid = id_of_value f in
+	    let fid =
+	      try id_find f with Not_found ->
+		Queue.push f queue;
+		id_of_value f
+	    in
 	      links := (i, id, fid) :: !links;
 	  );
 	  if i < max_len then (
@@ -388,8 +391,7 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       (label, !links)
   in
 
-  let rec value_one fmt r =
-    let id = id_of_value r in
+  let rec value_one fmt id r =
     let t = tag_of_value r in
       if Tags.mem t tags then (
 	let label, links = value_to_label_and_links id t r in
@@ -401,15 +403,14 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
 	  node_one fmt id ["label", label]
       )
   in
-
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
     fprintf fmt "graph [rankdir=LR, splines=true, overlap=false, sep=0.1];@,";
     fprintf fmt "node [shape=record, style=rounded];@,";
     fprintf fmt "edge [dir=both, arrowtail=odot];@,";
-    Queue.push r queue;
+    Queue.add r queue;
     while not (Queue.is_empty queue) do
       let r = Queue.pop queue in
-	value_one fmt r
+	value_one fmt (id_of_value r) r
     done;
     fprintf fmt "@]@,}@]";
     pp_print_newline fmt ()
