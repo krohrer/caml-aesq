@@ -162,7 +162,7 @@ and dump_to_string ?tags ?max_depth o =
     dump_to_buffer ?tags ?max_depth b o;
     Buffer.contents b
 
-and dump_with_formatter ?(tags=Tags.all) ?(max_depth=20) fmt o =
+and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
   let value2id = HT.create 31337 in
   let wave = Queue.create () in
   let indentation_for_string id = 2 (* String.length id + 2 *) in
@@ -180,10 +180,10 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=20) fmt o =
   in
 
   let sexpr_open fmt id =
-    fprintf fmt "@[<hov %d>(%s" (indentation_for_string id) id
+    fprintf fmt "@[<hv %d>(%s" (indentation_for_string id) id
 
   and sexpr_close fmt () =
-    fprintf fmt ")@,@]"
+    fprintf fmt ")@]"
 
   and sexpr_sep fmt () =
     fprintf fmt "@ "
@@ -315,9 +315,9 @@ and dot_with_formatter ?(tags=Tags.all) ?(follow=Tags.all) ?(max_len=0) fmt r =
   and attr_close fmt () =
     fprintf fmt "\",@]@ "
 
-  and attr_label fmt s =
-    attr_open fmt "label";
-    fprintf fmt "%s" s;
+  and attr_one fmt name value =
+    attr_open fmt name;
+    fprintf fmt "%S" value;
     attr_close fmt ()
   in
 
@@ -337,7 +337,7 @@ and dot_with_formatter ?(tags=Tags.all) ?(follow=Tags.all) ?(max_len=0) fmt r =
 	      Array.iteri (dot_link id) fields
 	| x ->
 	    node_open fmt id;
-	    attr_label fmt (value_desc ~long:true x r);
+	    attr_one fmt "label" (value_desc ~long:true x r);
 	    node_close fmt ()
 
   and dot_label i f =
@@ -367,7 +367,7 @@ and dot_with_formatter ?(tags=Tags.all) ?(follow=Tags.all) ?(max_len=0) fmt r =
 	    in
 	    let dst = sprintf "%s" lid in
 	      link_open fmt src dst;
-	      attr_label fmt (string_of_int i);
+	      attr_one fmt "label" (string_of_int i);
 	      link_close fmt ()
 
   in
