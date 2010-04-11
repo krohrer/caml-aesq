@@ -23,9 +23,11 @@ module Tags : sig
   val of_list : tag list -> t
 end
 
-val dot : ?tags:Tags.t -> ?follow:Tags.t -> ?max_len:int -> 'a -> unit
+val dot : ?tags:Tags.t -> ?max_len:int -> 'a -> unit
 
-val dot_to_file : ?tags:Tags.t -> ?follow:Tags.t -> ?max_len:int -> string -> 'a -> unit
+val dot_osx : ?tags:Tags.t -> ?max_len:int -> 'a -> bool
+
+val dot_to_file : ?tags:Tags.t -> ?max_len:int -> string -> 'a -> unit
 
 val dump : ?tags:Tags.t -> ?max_depth:int -> 'a -> unit
 

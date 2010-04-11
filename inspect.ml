@@ -12,6 +12,14 @@ end
 
 module HT = Hashtbl.Make(ValueRepr)
 
+let string_with_buffer n =
+  let b = Buffer.create n in
+    ( fun f ->
+	Buffer.clear b;
+	f b;
+	Buffer.contents b
+    )
+
 let addr r =
   let h = Nativeint.of_int (magic r land max_int) in
     Nativeint.add h h
@@ -163,19 +171,22 @@ and dump_to_string ?tags ?max_depth o =
     Buffer.contents b
 
 and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
-  let value2id = HT.create 31337 in
-  let wave = Queue.create () in
-  let indentation_for_string id = 2 (* String.length id + 2 *) in
+  let queue = Queue.create () in
+  let indentation_for_string id = 3 (* String.length id + 2 *) in
 
-  let make_id r =
-    let t = tag_of_value r in
-    let tid = tag_id t r in
-    let n = HT.length value2id in
-    let id = sprintf "%s-%X" tid n in
-      HT.add value2id r id;
-      id
-
-  and find_id r =
+  let rec value2id = HT.create 31337
+  and id_of_value r =
+    try
+      id_find r
+    with Not_found -> (
+      let t = tag_of_value r in
+      let tid = tag_id t r in
+      let n = HT.length value2id in
+      let id = sprintf "%s-%X" tid n in
+	HT.add value2id r id;
+	id
+    )
+  and id_find r =
     HT.find value2id r
   in
 
@@ -208,9 +219,9 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
 
   and sexpr_block ~depth fmt r =
     try
-      sexpr_ref fmt (find_id r)
+      sexpr_ref fmt (id_find r)
     with Not_found -> (
-      let id = make_id r in
+      let id = id_of_value r in
 	if depth < max_depth then (
 	  let n = size r in
 	    sexpr_open fmt id;
@@ -222,15 +233,15 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
 	) else (
 	  (* Postpone *)
 	  sexpr_ref fmt id;
-	  Queue.push r wave
+	  Queue.push r queue
 	)
     )
 
   and sexpr_double_array a fmt r =
     try
-      sexpr_ref fmt (find_id r)
+      sexpr_ref fmt (id_find r)
     with Not_found -> (
-      let id = make_id r in
+      let id = id_of_value r in
 	sexpr_open fmt id;
 	for i = 0 to Array.length a - 1 do
 	  let ai = a.(i) in
@@ -244,11 +255,11 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
   in
   let values = "DUMP" in
   let r = repr o in
-    Queue.push r wave;
     pp_open_vbox fmt 0;
     sexpr_open fmt values;
-    while not (Queue.is_empty wave) do
-      let r = Queue.pop wave in
+    Queue.push r queue;
+    while not (Queue.is_empty queue) do
+      let r = Queue.pop queue in
 	sexpr_sep fmt ();
 	sexpr_value ~depth:0 fmt r
     done;
@@ -258,127 +269,213 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
 (*----------------------------------------------------------------------------*)
 
 type field =
-  | Field_link of string * string
+  | Field_link of string * Obj.t
   | Field_label of string
 
-let rec dot ?tags ?follow ?max_len o =
-  dot_with_formatter ?tags ?follow std_formatter (repr o)
+let rec dot ?tags ?max_len o =
+  dot_with_formatter ?tags std_formatter (repr o)
 
-and dot_to_file ?tags ?follow ?max_len path o =
+and dot_osx ?tags ?max_len o =
+  let basename = Filename.temp_file "camldump" "." in
+  let pr = "dot" in
+  let format = "pdf" in
+  let dotfile = basename ^ "dot" in
+  let outfile = basename ^ format in
+    dot_to_file ?tags ?max_len dotfile o;
+    let dotcmd = sprintf "%s -T%s -o %S %S" pr format outfile dotfile in
+    let outcmd = sprintf "open %S" outfile in
+    Sys.command dotcmd == 0 &&
+      Sys.command outcmd == 0
+
+and dot_to_file ?tags ?max_len path o =
   let oc = open_out path in
     try
       let fmt = formatter_of_out_channel oc in
-	dot_with_formatter ?tags ?follow ?max_len fmt (repr o);
+	dot_with_formatter ?tags ?max_len fmt (repr o);
 	flush oc;
 	close_out oc
     with
       | _ -> close_out oc
 
-and dot_with_formatter ?(tags=Tags.all) ?(follow=Tags.all) ?(max_len=0) fmt r =
-  let value2id = HT.create 31337 in
+and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
   let queue = Queue.create () in
+  let strbuf = string_with_buffer 80 in
 
-  let rec make_id abbr r =
-    try HT.find value2id r with
-	Not_found ->
-	  let id = sprintf "%s_%d" abbr (HT.length value2id) in
-	    HT.add value2id r id;
-	    Queue.add (id, r) queue;
-	    id
+  let rec value2id = HT.create 31337
+  and id_of_value r =
+    try id_find r with Not_found -> (
+      let t = tag_of_value r in
+      let id = sprintf "%s_%d" (tag_id t r) (HT.length value2id) in
+	HT.add value2id r id;
+	id
+    )
+  and id_find r =
+    HT.find value2id r
+  in
 
-  and make_field t r i =
-    assert (tag r < no_scan_tag);
-    let f = field r i in
-      match tag_of_value f with
-	| Lazy | Closure | Object | Infix | Forward | Block as x when Tags.mem t follow ->
-	    let long = Tags.mem x tags in
-	      Field_link (make_id (tag_id x f) f, value_desc ~long x f)
-	| x ->
-	    let long = Tags.mem x tags in
-	      Field_label (value_desc ~long x f)
+  let rec fields_of_value r =
+    if tag r < no_scan_tag then (
+      let field_of_value i =
+	let f = field r i in
+	  match tag_of_value f with
+	    | Lazy | Closure | Object | Infix | Forward | Block as x ->
+		let long = Tags.mem x tags in
+		  Field_link (value_desc ~long x f, f)
+	    | x ->
+		let long = Tags.mem x tags in
+		  Field_label (value_desc ~long x f)
+      in
+	Array.init (size r) field_of_value
+    )
+    else (
+      [||]
+    )
 
-  and node_open fmt id =
+  and fields_to_label id desc fields : string =
+    let add_field b i f =
+      if i < max_len then
+	match fields.(i) with
+    	  | Field_label l ->
+	      bprintf b "| %s" l
+    	  | Field_link (l, _) ->
+	      bprintf b "|<f%d> %s" i l
+      else if i = max_len && 0 <= max_len then
+	bprintf b "|<rest> ..."
+      else
+	()
+    in
+    let add_fields b = 
+      bprintf b "<hd> %s" desc;
+      Array.iteri (add_field b) fields
+    in
+      strbuf add_fields
+
+  and fields_to_links id fields =
+    let links = ref [] in
+    let addi_link i =
+      function
+	| Field_label _ ->
+	    ()
+	| Field_link (_, f) ->
+	    let dst = 
+	      try id_find f with Not_found -> (
+		let id = id_of_value f in
+		  Queue.push f queue;
+		  id
+	      )
+	    in
+	    let src = id in
+	    let attrs = ("label", string_of_int i) :: [] in
+	      links := ((src,dst), attrs) :: !links;
+    in
+      Array.iteri addi_link fields;
+      !links
+  in
+
+  (*   let links = ref [] in *)
+  (*   let add_link i = *)
+  (*     function *)
+  (* 	| Field_label l ->  *)
+
+
+  (*     links := (src, dst) :: !links *)
+  (* in *)
+  (*     Array.iteri add_link *)
+  (*   let fold i links fields = *)
+  (*     if i < n then *)
+  (*     function *)
+  (* 	| Field_label l -> links *)
+  (* 	| Field_link (id, _) -> id :: links *)
+  (*   in *)
+  (*     List.fold_left [] aux fields *)
+  (* in *)
+
+  (*     match f with *)
+  (* 	| Field_label _ -> *)
+  (* 	    () *)
+  (* 	| Field_link (lid, _) -> *)
+  (* 	    let src = *)
+  (* 	      if i < max_len then *)
+  (* 	    	sprintf "%s:f%d" id i *)
+  (* 	      else if 0 < max_len then *)
+  (* 	    	sprintf "%s:rest" id *)
+  (* 	      else *)
+  (* 		id *)
+  (* 	    in *)
+  (* 	    let dst = sprintf "%s" lid in *)
+  (* 	      link_open fmt src dst; *)
+  (* 	      attr_one fmt "label" (string_of_int i); *)
+  (* 	      link_close fmt () *)
+
+  let node_open fmt id =
     fprintf fmt "@[<2>%s@ [" id
 
   and node_close fmt () =
     fprintf fmt "];@]@,"
 
-  and link_open fmt src dst =
+  and link_open fmt (src, dst) =
     fprintf fmt "@[<2>%s ->@ %s@ [" src dst
 
   and link_close fmt () =
     fprintf fmt "];@]@,"
 
   and attr_open fmt name =
-    fprintf fmt "@[<h>%s = \"" name
+    fprintf fmt "@[<h>%s = " name
 
   and attr_close fmt () =
-    fprintf fmt "\",@]@ "
+    fprintf fmt ",@]@ "
+  in
+
+  let rec node_one fmt id attrs =
+    node_open fmt id;
+    attr_list fmt attrs;
+    node_close fmt ()
+
+  and link_one fmt (l,attrs) =
+    link_open fmt l;
+    attr_list fmt attrs;
+    link_close fmt ()
+
+  and link_list fmt links =
+    List.iter (link_one fmt) links
 
   and attr_one fmt name value =
     attr_open fmt name;
     fprintf fmt "%S" value;
     attr_close fmt ()
+
+  and attr_list fmt attrs =
+      (* The list has to be reversed because of the way Graphviz handles
+	 duplicate attributes. *)
+      List.iter (fun (k,v) -> attr_one fmt k v) (List.rev attrs)
   in
 
-  let rec dot_node id fmt r =
+  let rec value_one fmt r =
+    let id = id_of_value r in
     let t = tag_of_value r in
-      match t with
-	| Lazy | Closure | Object | Infix | Forward | Block as x when Tags.mem x tags ->
-	    let n = size r in
-	    let too_long = n > max_len in (* Print more info if fields are cut off *)
-	    let fields = Array.init n (make_field t r) in
-	      node_open fmt id;
-	      attr_open fmt "label";
-	      fprintf fmt "<hd> %s" (value_desc ~long:too_long x r);
-	      Array.iteri dot_label fields;
-	      attr_close fmt ();
-	      node_close fmt ();
-	      Array.iteri (dot_link id) fields
-	| x ->
-	    node_open fmt id;
-	    attr_one fmt "label" (value_desc ~long:true x r);
-	    node_close fmt ()
-
-  and dot_label i f =
-    if i < max_len then
-      match f with
-    	| Field_label l ->
-    	    fprintf fmt "| %s" l
-    	| Field_link (_, l) ->
-    	    fprintf fmt "|<f%d> %s" i l
-    else if i = max_len && 0 < max_len  then
-      fprintf fmt "|<rest> ..."
-    else
-      ()
-
-  and dot_link id i f =
-      match f with
-	| Field_label _ ->
-	    ()
-	| Field_link (lid, _) ->
-	    let src =
-	      if i < max_len then
-	    	sprintf "%s:f%d" id i
-	      else if 0 < max_len then
-	    	sprintf "%s:rest" id
-	      else
-		id
-	    in
-	    let dst = sprintf "%s" lid in
-	      link_open fmt src dst;
-	      attr_one fmt "label" (string_of_int i);
-	      link_close fmt ()
-
+      if Tags.mem t tags then (
+	let desc = value_desc ~long:true t r in
+	let fields = fields_of_value r in
+	let label = fields_to_label id desc fields in
+	let links = fields_to_links id fields in
+	let attrs = ("label", label) :: [] in
+	  node_one fmt id attrs;
+	  link_list fmt links
+      ) else (
+	let label = value_desc ~long:true t r in
+	let attrs = ("label", label) :: [] in
+	  node_one fmt id attrs
+      )
   in
-    ignore (make_id "ROOT" r);
+
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
     fprintf fmt "graph [rankdir=LR, splines=true, overlap=false, sep=0.1];@,";
     fprintf fmt "node [shape=record, style=rounded];@,";
     fprintf fmt "edge [dir=both, arrowtail=odot];@,";
+    Queue.push r queue;
     while not (Queue.is_empty queue) do
-      let id, r = Queue.take queue in
-	dot_node id fmt r
+      let r = Queue.pop queue in
+	value_one fmt r
     done;
     fprintf fmt "@]@,}@]";
     pp_print_newline fmt ()
