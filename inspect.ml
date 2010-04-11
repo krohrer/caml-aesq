@@ -142,8 +142,8 @@ let value_desc ?(long=false) t r =
 		let n = string_max_length - (String.length string_ellipsis) in
 		  sprintf "%S%s" (String.sub s 0 n) string_ellipsis
 	      else
-		s
-	| Double_array -> 
+		sprintf "%S" s
+	| Double_array ->
 	    sprintf "%s[%d]" abbr (Array.length (magic r))
 	| Custom ->
 	    sprintf "0x%nX" (custom_id r)
@@ -163,16 +163,17 @@ object
   method graph_attrs : dot_attrs
   method all_nodes_attrs : dot_attrs
   method all_edges_attrs : dot_attrs
-  method node_attrs : ?root:bool -> string -> tag -> dot_attrs
-  method edge_attrs : tag -> int -> tag -> dot_attrs
+  method node_attrs : ?root:bool -> size:int -> string -> tag -> dot_attrs
+  method edge_attrs : field:int -> tag -> tag -> dot_attrs
 
-  method should_follow_edge : tag -> int -> tag -> bool
+  method should_expand_node : size:int -> tag -> bool
+  method should_follow_edge : field:int -> tag -> tag -> bool
   method max_size : int
 end
 
 class type dump_context =
 object
-  method expand_tag : tag -> bool
+  method should_expand : tag -> bool
   method max_depth : int
 end
 
@@ -195,7 +196,7 @@ object
       "dir", "both";
       "arrowtail", "odot"
     ]
-  method node_attrs ?(root=false) label t =
+  method node_attrs ?(root=false) ~size label t =
     let attrs = 
       ("label", label) :: (
 	if root then
@@ -212,16 +213,17 @@ object
 	| x ->
 	    attrs
 
-  method edge_attrs st i dt =
-    [ "label", string_of_int i ]
+  method edge_attrs ~field st dt =
+    [ "label", string_of_int field ]
 
-  method should_follow_edge t i x = true
+  method should_expand_node ~size t = true
+  method should_follow_edge ~field t x = true
   method max_size = 5
 end
 
 let default_dump_context =
 object
-  method expand_tag t = Tags.mem t Tags.all
+  method should_expand t = true
   method max_depth = 20
 end
 
@@ -253,7 +255,7 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
       let t = tag_of_value r in
       let tid = tag_id t r in
       let n = HT.length value2id in
-      let id = sprintf "%s-%X" tid n in
+      let id = sprintf "%s/%X" tid n in
 	HT.add value2id r id;
 	id
     )
@@ -276,54 +278,55 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
 
   let rec sexpr_value ~depth fmt r =
     let t = tag_of_value r in
-    let long = context#expand_tag t in
+    let long = context#should_expand t in
       match t with
-	| x when tag r < no_scan_tag && long ->
-	    sexpr_block ~depth fmt r
-	| Double_array when long ->
-	    sexpr_double_array (magic r) fmt r
-	| String when long ->
-	    fprintf fmt "%S" (magic r)
+	| Int | Out_of_heap | Unaligned ->
+	    pp_print_string fmt (value_desc ~long t r)
+	| x when long ->
+	    sexpr_block ~depth t fmt r
 	| x ->
-	    let desc = value_desc ~long t r in
-	      pp_print_string fmt desc
+	    pp_print_string fmt (value_desc ~long t r)
 
-  and sexpr_block ~depth fmt r =
+  and sexpr_block ~depth t fmt r =
     try
       sexpr_ref fmt (id_find r)
     with Not_found -> (
       let id = id_of_value r in
-	if depth < context#max_depth then (
-	  let n = size r in
-	    sexpr_open fmt id;
-	    for i = 0 to n - 1 do
-	      sexpr_sep fmt ();
-	      sexpr_value ~depth:(depth + 1) fmt (field r i)
-	    done;
-	    sexpr_close fmt ()
-	) else (
+	if depth <= context#max_depth then (
+	  sexpr_open fmt id;
+	  sexpr_block_body ~depth t fmt r;
+	  sexpr_close fmt ()
+	) else if context#max_depth > 0 then (
 	  (* Postpone *)
 	  sexpr_ref fmt id;
 	  Queue.push r queue
 	)
     )
 
-  and sexpr_double_array a fmt r =
-    try
-      sexpr_ref fmt (id_find r)
-    with Not_found -> (
-      let id = id_of_value r in
-	sexpr_open fmt id;
-	for i = 0 to Array.length a - 1 do
-	  let ai = a.(i) in
-	  let desc = value_desc ~long:true (tag_of_value ai) (repr ai) in
-	    sexpr_sep fmt ();
-	    pp_print_string fmt desc;
-	done;
-	sexpr_close fmt ()
-    )
-
+  and sexpr_block_body ~depth t fmt r =
+    match t with
+      | _ when tag r < no_scan_tag ->
+	  let n = size r in
+	    for i = 0 to n - 1 do
+	      sexpr_sep fmt ();
+	      sexpr_value ~depth:(depth + 1) fmt (field r i)
+	    done
+      | Double ->
+	  sexpr_sep fmt ();
+	  fprintf fmt "%g" (magic r)
+      | Double_array ->
+	  let a = magic r in
+	    for i = 0 to Array.length a - 1 do
+	      sexpr_sep fmt ();
+	      fprintf fmt "%g" a.(i)
+	    done
+      | Custom ->
+	  sexpr_sep fmt ();
+	  fprintf fmt "0x%nX" (custom_id r)
+      | _ ->
+	  ()
   in
+
   let values = "DUMP" in
   let r = repr o in
     pp_open_vbox fmt 0;
@@ -430,30 +433,28 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
 	let f = field r i in
 	let x = tag_of_value f in
 	let max_size = context#max_size in
-	let linked =
-	  match x with
-	    | Int | Out_of_heap | Abstract | Unaligned ->
-		false
-	    | _ -> (
-		if context#should_follow_edge t i x then (
-		  let fid =
-		    try id_find f with Not_found ->
-		      Queue.push f queue;
-		      id_of_value f
-		  in
-		    links := (id, t, i, fid, x) :: !links;
-		    true
+	let long = context#should_expand_node ~size:n x in
+	  (
+	    match x with
+	      | Int | Out_of_heap | Unaligned ->
+		  ()
+	      | _ -> (
+		  if long && context#should_follow_edge ~field:i t x then (
+		    let fid =
+		      try id_find f with Not_found ->
+			Queue.push f queue;
+			id_of_value f
+		    in
+		      links := (id, t, i, fid, x) :: !links;
+		  )
 		)
-		else
-		  false
-	      )
-	in
+	  );
 	  if i < max_size then (
-	    let desc = value_desc ~long:(not linked) x f in
-	      bprintf b "|<f%d> %s" i desc
+	    let desc = value_desc ~long x f in
+	      bprintf b "| %s" desc
 	  )
 	  else if i = max_size && 0 <= max_size then (
-	    bprintf b "|<rest> ..."
+	    bprintf b "| ..."
 	  )
 	  else (
 	    ()
@@ -475,9 +476,10 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   let rec value_one ?(root=false) fmt id r =
     let t = tag_of_value r in
     let label, links = value_to_label_and_links id t r in
-    let node_attrs = context#node_attrs ~root label t in
+    let size = if tag r < no_scan_tag then size r else 0 in
+    let node_attrs = context#node_attrs ~root ~size label t in
     let aux (id, st, i, fid, dt) = 
-      let edge_attrs = context#edge_attrs st i dt in
+      let edge_attrs = context#edge_attrs ~field:i st dt in
 	link_one fmt id i fid edge_attrs
     in
       node_one fmt id node_attrs;

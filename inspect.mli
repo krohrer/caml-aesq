@@ -30,16 +30,17 @@ object
   method graph_attrs : dot_attrs
   method all_nodes_attrs : dot_attrs
   method all_edges_attrs : dot_attrs
-  method node_attrs : ?root:bool -> string -> tag -> dot_attrs
-  method edge_attrs : tag -> int -> tag -> dot_attrs
+  method node_attrs : ?root:bool -> size:int -> string -> tag -> dot_attrs
+  method edge_attrs : field:int -> tag -> tag -> dot_attrs
 
-  method should_follow_edge : tag -> int -> tag -> bool
+  method should_expand_node : size:int -> tag -> bool
+  method should_follow_edge : field:int -> tag -> tag -> bool
   method max_size : int
 end
 
 class type dump_context =
 object
-  method expand_tag : tag -> bool
+  method should_expand : tag -> bool
   method max_depth : int
 end
 
