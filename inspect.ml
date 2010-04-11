@@ -372,41 +372,6 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       !links
   in
 
-  (*   let links = ref [] in *)
-  (*   let add_link i = *)
-  (*     function *)
-  (* 	| Field_label l ->  *)
-
-
-  (*     links := (src, dst) :: !links *)
-  (* in *)
-  (*     Array.iteri add_link *)
-  (*   let fold i links fields = *)
-  (*     if i < n then *)
-  (*     function *)
-  (* 	| Field_label l -> links *)
-  (* 	| Field_link (id, _) -> id :: links *)
-  (*   in *)
-  (*     List.fold_left [] aux fields *)
-  (* in *)
-
-  (*     match f with *)
-  (* 	| Field_label _ -> *)
-  (* 	    () *)
-  (* 	| Field_link (lid, _) -> *)
-  (* 	    let src = *)
-  (* 	      if i < max_len then *)
-  (* 	    	sprintf "%s:f%d" id i *)
-  (* 	      else if 0 < max_len then *)
-  (* 	    	sprintf "%s:rest" id *)
-  (* 	      else *)
-  (* 		id *)
-  (* 	    in *)
-  (* 	    let dst = sprintf "%s" lid in *)
-  (* 	      link_open fmt src dst; *)
-  (* 	      attr_one fmt "label" (string_of_int i); *)
-  (* 	      link_close fmt () *)
-
   let node_open fmt id =
     fprintf fmt "@[<2>%s@ [" id
 
