@@ -146,31 +146,102 @@ let value_desc ?(long=false) t r =
 	| Double_array -> 
 	    sprintf "%s[%d]" abbr (Array.length (magic r))
 	| Custom ->
-	    sprintf "0x%nX#" (custom_id r)
+	    sprintf "0x%nX" (custom_id r)
 	| Out_of_heap ->
-	    sprintf "0x%nX!" (addr r)
+	    sprintf "0x%nX" (addr r)
 	| Unaligned ->
-	    sprintf "0x%nX?" (addr r)
+	    sprintf "0x%nX" (addr r)
     else
       abbr
 
 (*----------------------------------------------------------------------------*)
 
-let rec dump ?tags ?max_depth o =
-  dump_with_formatter ?tags ?max_depth std_formatter (repr o)
+type dot_attrs = (string * string) list
 
-and dump_to_channel ?tags ?max_depth c o =
-  dump_with_formatter ?tags ?max_depth (formatter_of_out_channel c) (repr o)
+class type dot_context =
+object
+  method graph_attrs : dot_attrs
+  method all_nodes_attrs : dot_attrs
+  method all_edges_attrs : dot_attrs
+  method node_attrs : ?root:bool -> string -> tag -> dot_attrs
+  method edge_attrs : tag -> int -> tag -> dot_attrs
 
-and dump_to_buffer ?tags ?max_depth b o =
-  dump_with_formatter ?tags ?max_depth (formatter_of_buffer b) (repr o)
+  method should_follow_edge : tag -> int -> tag -> bool
+  method max_size : int
+end
 
-and dump_to_string ?tags ?max_depth o =
+class type dump_context =
+object
+  method expand_tag : tag -> bool
+  method max_depth : int
+end
+
+let default_dot_context =
+object
+  method graph_attrs =
+    [
+      "rankdir", "LR";
+      "splines", "true";
+      "overlap", "false";
+      "sep", "0.1"
+    ]
+  method all_nodes_attrs =
+    [
+      "shape", "record";
+      "style", "rounded"
+    ]
+  method all_edges_attrs =
+    [
+      "dir", "both";
+      "arrowtail", "odot"
+    ]
+  method node_attrs ?(root=false) label t =
+    let attrs = 
+      ("label", label) :: (
+	if root then
+	  [
+	    "penwidth", "3.0";
+	  ]
+	else
+	  []
+      )
+    in
+      match t with
+	| String ->
+	    ("color", "green"):: attrs
+	| x ->
+	    attrs
+
+  method edge_attrs st i dt =
+    [ "label", string_of_int i ]
+
+  method should_follow_edge t i x = true
+  method max_size = 5
+end
+
+let default_dump_context =
+object
+  method expand_tag t = Tags.mem t Tags.all
+  method max_depth = 20
+end
+
+(*----------------------------------------------------------------------------*)
+
+let rec dump ?context o =
+  dump_with_formatter ?context std_formatter (repr o)
+
+and dump_to_channel ?context c o =
+  dump_with_formatter ?context (formatter_of_out_channel c) (repr o)
+
+and dump_to_buffer ?context b o =
+  dump_with_formatter ?context (formatter_of_buffer b) (repr o)
+
+and dump_to_string ?context o =
   let b = Buffer.create 128 in
-    dump_to_buffer ?tags ?max_depth b o;
+    dump_to_buffer ?context b o;
     Buffer.contents b
 
-and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
+and dump_with_formatter ?(context=default_dump_context) fmt o =
   let queue = Queue.create () in
   let indentation_for_string id = 3 (* String.length id + 2 *) in
 
@@ -205,15 +276,15 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
 
   let rec sexpr_value ~depth fmt r =
     let t = tag_of_value r in
+    let long = context#expand_tag t in
       match t with
-	| x when tag r < no_scan_tag && Tags.mem x tags ->
+	| x when tag r < no_scan_tag && long ->
 	    sexpr_block ~depth fmt r
-	| Double_array as x when Tags.mem x tags ->
+	| Double_array when long ->
 	    sexpr_double_array (magic r) fmt r
-	| String as x when Tags.mem x tags ->
+	| String when long ->
 	    fprintf fmt "%S" (magic r)
 	| x ->
-	    let long = Tags.mem x tags in
 	    let desc = value_desc ~long t r in
 	      pp_print_string fmt desc
 
@@ -222,7 +293,7 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
       sexpr_ref fmt (id_find r)
     with Not_found -> (
       let id = id_of_value r in
-	if depth < max_depth then (
+	if depth < context#max_depth then (
 	  let n = size r in
 	    sexpr_open fmt id;
 	    for i = 0 to n - 1 do
@@ -268,32 +339,32 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
 
 (*----------------------------------------------------------------------------*)
 
-let rec dot ?tags ?max_len o =
-  dot_with_formatter ?tags std_formatter (repr o)
+let rec dot ?context o =
+  dot_with_formatter ?context std_formatter (repr o)
 
-and dot_osx ?tags ?max_len o =
+and dot_osx ?context o =
   let basename = Filename.temp_file "camldump" "." in
   let pr = "dot" in
   let format = "pdf" in
   let dotfile = basename ^ "dot" in
   let outfile = basename ^ format in
-    dot_to_file ?tags ?max_len dotfile o;
+    dot_to_file ?context dotfile o;
     let dotcmd = sprintf "%s -T%s -o %S %S" pr format outfile dotfile in
     let outcmd = sprintf "open %S" outfile in
     Sys.command dotcmd == 0 &&
       Sys.command outcmd == 0
 
-and dot_to_file ?tags ?max_len path o =
+and dot_to_file ?context path o =
   let oc = open_out path in
     try
       let fmt = formatter_of_out_channel oc in
-	dot_with_formatter ?tags ?max_len fmt (repr o);
+	dot_with_formatter ?context fmt (repr o);
 	flush oc;
 	close_out oc
     with
       | _ -> close_out oc
 
-and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
+and dot_with_formatter ?(context=default_dot_context) fmt r =
   let queue = Queue.create () in
   let strbuf = string_with_buffer 80 in
 
@@ -315,7 +386,7 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
   and node_close fmt () =
     fprintf fmt "];@]@,"
 
-  and link_open fmt (i, id, fid) =
+  and link_open fmt id i fid =
     let src = id in
     let dst = fid in
       fprintf fmt "@[<2>%s ->@ %s@ [" src dst
@@ -335,8 +406,8 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
     attr_list fmt attrs;
     node_close fmt ()
 
-  and link_one fmt l attrs =
-    link_open fmt l;
+  and link_one fmt id i fid attrs =
+    link_open fmt id i fid;
     attr_list fmt attrs;
     link_close fmt ()
 
@@ -358,20 +429,30 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       if i < n then (
 	let f = field r i in
 	let x = tag_of_value f in
-	  if tag f < no_scan_tag then (
-	    let fid =
-	      try id_find f with Not_found ->
-		Queue.push f queue;
-		id_of_value f
-	    in
-	      links := (i, id, fid) :: !links;
-	  );
-	  if i < max_len then (
-	    let long = tag f >= no_scan_tag in
-	    let desc = value_desc ~long x f in
+	let max_size = context#max_size in
+	let linked =
+	  match x with
+	    | Int | Out_of_heap | Abstract | Unaligned ->
+		false
+	    | _ -> (
+		if context#should_follow_edge t i x then (
+		  let fid =
+		    try id_find f with Not_found ->
+		      Queue.push f queue;
+		      id_of_value f
+		  in
+		    links := (id, t, i, fid, x) :: !links;
+		    true
+		)
+		else
+		  false
+	      )
+	in
+	  if i < max_size then (
+	    let desc = value_desc ~long:(not linked) x f in
 	      bprintf b "|<f%d> %s" i desc
 	  )
-	  else if i = max_len && 0 <= max_len then (
+	  else if i = max_size && 0 <= max_size then (
 	    bprintf b "|<rest> ..."
 	  )
 	  else (
@@ -391,23 +472,23 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       (label, !links)
   in
 
-  let rec value_one fmt id r =
+  let rec value_one ?(root=false) fmt id r =
     let t = tag_of_value r in
-      if Tags.mem t tags then (
-	let label, links = value_to_label_and_links id t r in
-	  node_one fmt id ["label", label];
-	  List.iter (fun ((i, _, _) as l) -> link_one fmt l ["label", string_of_int i]) links
-      )
-      else (
-	let label = value_desc ~long:true t r in
-	  node_one fmt id ["label", label]
-      )
+    let label, links = value_to_label_and_links id t r in
+    let node_attrs = context#node_attrs ~root label t in
+    let aux (id, st, i, fid, dt) = 
+      let edge_attrs = context#edge_attrs st i dt in
+	link_one fmt id i fid edge_attrs
+    in
+      node_one fmt id node_attrs;
+      List.iter aux links
   in
+    
     fprintf fmt "@[<v>@[<v 2>digraph {@,";
-    fprintf fmt "graph [rankdir=LR, splines=true, overlap=false, sep=0.1];@,";
-    fprintf fmt "node [shape=record, style=rounded];@,";
-    fprintf fmt "edge [dir=both, arrowtail=odot];@,";
-    Queue.add r queue;
+    node_one fmt "graph" context#graph_attrs;
+    node_one fmt "node" context#all_nodes_attrs;
+    node_one fmt "edge" context#all_edges_attrs;
+    value_one ~root:true fmt (id_of_value r) r;
     while not (Queue.is_empty queue) do
       let r = Queue.pop queue in
 	value_one fmt (id_of_value r) r

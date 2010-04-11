@@ -23,18 +23,43 @@ module Tags : sig
   val of_list : tag list -> t
 end
 
-val dot : ?tags:Tags.t -> ?max_len:int -> 'a -> unit
+type dot_attrs = (string * string) list
 
-val dot_osx : ?tags:Tags.t -> ?max_len:int -> 'a -> bool
+class type dot_context =
+object
+  method graph_attrs : dot_attrs
+  method all_nodes_attrs : dot_attrs
+  method all_edges_attrs : dot_attrs
+  method node_attrs : ?root:bool -> string -> tag -> dot_attrs
+  method edge_attrs : tag -> int -> tag -> dot_attrs
 
-val dot_to_file : ?tags:Tags.t -> ?max_len:int -> string -> 'a -> unit
+  method should_follow_edge : tag -> int -> tag -> bool
+  method max_size : int
+end
 
-val dump : ?tags:Tags.t -> ?max_depth:int -> 'a -> unit
+class type dump_context =
+object
+  method expand_tag : tag -> bool
+  method max_depth : int
+end
 
-val dump_to_string : ?tags:Tags.t -> ?max_depth:int -> 'a -> string
+val default_dot_context : dot_context
+val default_dump_context : dump_context
 
-val dump_to_buffer : ?tags:Tags.t -> ?max_depth:int -> Buffer.t -> 'a -> unit
+(* [max_size] can be negative as well, in which case the record does
+   not even show if there are additional fields. *)
+val dot : ?context:dot_context -> 'a -> unit
 
-val dump_to_channel : ?tags:Tags.t -> ?max_depth:int -> out_channel -> 'a -> unit
+val dot_osx : ?context:dot_context -> 'a -> bool
+
+val dot_to_file : ?context:dot_context -> string -> 'a -> unit
+
+val dump : ?context:dump_context -> 'a -> unit
+
+val dump_to_string : ?context:dump_context -> 'a -> string
+
+val dump_to_buffer : ?context:dump_context -> Buffer.t -> 'a -> unit
+
+val dump_to_channel : ?context:dump_context -> out_channel -> 'a -> unit
 
 val heap_size : ?tags:Tags.t -> ?follow:Tags.t -> 'a -> int
