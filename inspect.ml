@@ -206,7 +206,7 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
   let rec sexpr_value ~depth fmt r =
     let t = tag_of_value r in
       match t with
-	| Lazy | Closure | Object | Infix | Forward | Block as x when Tags.mem x tags ->
+	| x when tag r < no_scan_tag && Tags.mem x tags ->
 	    sexpr_block ~depth fmt r
 	| Double_array as x when Tags.mem x tags ->
 	    sexpr_double_array (magic r) fmt r
@@ -268,10 +268,6 @@ and dump_with_formatter ?(tags=Tags.all) ?(max_depth=10) fmt o =
 
 (*----------------------------------------------------------------------------*)
 
-type field =
-  | Field_link of string * Obj.t
-  | Field_label of string
-
 let rec dot ?tags ?max_len o =
   dot_with_formatter ?tags std_formatter (repr o)
 
@@ -307,69 +303,11 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       let t = tag_of_value r in
       let id = sprintf "%s_%d" (tag_id t r) (HT.length value2id) in
 	HT.add value2id r id;
+	Queue.push r queue;
 	id
     )
   and id_find r =
     HT.find value2id r
-  in
-
-  let rec fields_of_value r =
-    if tag r < no_scan_tag then (
-      let field_of_value i =
-	let f = field r i in
-	  match tag_of_value f with
-	    | Lazy | Closure | Object | Infix | Forward | Block as x ->
-		let long = Tags.mem x tags in
-		  Field_link (value_desc ~long x f, f)
-	    | x ->
-		let long = Tags.mem x tags in
-		  Field_label (value_desc ~long x f)
-      in
-	Array.init (size r) field_of_value
-    )
-    else (
-      [||]
-    )
-
-  and fields_to_label id desc fields : string =
-    let add_field b i f =
-      if i < max_len then
-	match fields.(i) with
-    	  | Field_label l ->
-	      bprintf b "| %s" l
-    	  | Field_link (l, _) ->
-	      bprintf b "|<f%d> %s" i l
-      else if i = max_len && 0 <= max_len then
-	bprintf b "|<rest> ..."
-      else
-	()
-    in
-    let add_fields b = 
-      bprintf b "<hd> %s" desc;
-      Array.iteri (add_field b) fields
-    in
-      strbuf add_fields
-
-  and fields_to_links id fields =
-    let links = ref [] in
-    let addi_link i =
-      function
-	| Field_label _ ->
-	    ()
-	| Field_link (_, f) ->
-	    let dst = 
-	      try id_find f with Not_found -> (
-		let id = id_of_value f in
-		  Queue.push f queue;
-		  id
-	      )
-	    in
-	    let src = id in
-	    let attrs = ("label", string_of_int i) :: [] in
-	      links := ((src,dst), attrs) :: !links;
-    in
-      Array.iteri addi_link fields;
-      !links
   in
 
   let node_open fmt id =
@@ -378,8 +316,10 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
   and node_close fmt () =
     fprintf fmt "];@]@,"
 
-  and link_open fmt (src, dst) =
-    fprintf fmt "@[<2>%s ->@ %s@ [" src dst
+  and link_open fmt (i, id, fid) =
+    let src = id in
+    let dst = fid in
+      fprintf fmt "@[<2>%s ->@ %s@ [" src dst
 
   and link_close fmt () =
     fprintf fmt "];@]@,"
@@ -396,13 +336,10 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
     attr_list fmt attrs;
     node_close fmt ()
 
-  and link_one fmt (l,attrs) =
+  and link_one fmt l attrs =
     link_open fmt l;
     attr_list fmt attrs;
     link_close fmt ()
-
-  and link_list fmt links =
-    List.iter (link_one fmt) links
 
   and attr_one fmt name value =
     attr_open fmt name;
@@ -415,21 +352,53 @@ and dot_with_formatter ?(tags=Tags.all) ?(max_len=(-1)) fmt r =
       List.iter (fun (k,v) -> attr_one fmt k v) (List.rev attrs)
   in
 
+  let value_to_label_and_links id t r =
+    let n = if tag r < no_scan_tag then size r else 0 in
+    let links = ref [] in
+    let rec iter b i =
+      if i < n then (
+	let f = field r i in
+	let x = tag_of_value f in
+	  if tag f < no_scan_tag then (
+	    let fid = id_of_value f in
+	      links := (i, id, fid) :: !links;
+	  );
+	  if i < max_len then (
+	    let long = tag f >= no_scan_tag in
+	    let desc = value_desc ~long x f in
+	      bprintf b "|<f%d> %s" i desc
+	  )
+	  else if i = max_len && 0 <= max_len then (
+	    bprintf b "|<rest> ..."
+	  )
+	  else (
+	    ()
+	  );
+	  iter b (i + 1)
+      )
+      else
+	()
+    in
+    let bprint b =
+      let desc = value_desc ~long:true t r in
+	bprintf b "<hd> %s" desc;
+	iter b 0
+    in
+    let label = strbuf bprint in
+      (label, !links)
+  in
+
   let rec value_one fmt r =
     let id = id_of_value r in
     let t = tag_of_value r in
       if Tags.mem t tags then (
-	let desc = value_desc ~long:true t r in
-	let fields = fields_of_value r in
-	let label = fields_to_label id desc fields in
-	let links = fields_to_links id fields in
-	let attrs = ("label", label) :: [] in
-	  node_one fmt id attrs;
-	  link_list fmt links
-      ) else (
+	let label, links = value_to_label_and_links id t r in
+	  node_one fmt id ["label", label];
+	  List.iter (fun ((i, _, _) as l) -> link_one fmt l ["label", string_of_int i]) links
+      )
+      else (
 	let label = value_desc ~long:true t r in
-	let attrs = ("label", label) :: [] in
-	  node_one fmt id attrs
+	  node_one fmt id ["label", label]
       )
   in
 
