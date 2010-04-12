@@ -31,6 +31,8 @@ let addr r =
 	 therefore have to make sure that the lower bit is one to make
 	 a proper int of it and then multiply by 2. *)
 
+let (>>>) x f = f x
+
 (*------------------------------------*)
 
 type tag =
@@ -123,7 +125,7 @@ let value_mnemonic r t =
     | Out_of_heap -> "OADR"
     | Unaligned -> "UADR"
 
-let value_unknown =
+let value_mnemonic_unknown =
   "????"
 
 let value_abbrev r t =
@@ -193,6 +195,19 @@ let colors_orrd8 =
     "#990000";
   |]
 
+let colors_ylgnbu9 =
+  [|
+    "#ffffe5";
+    "#fff7bc";
+    "#fee391";
+    "#fec44f";
+    "#fe9929";
+    "#ec7014";
+    "#cc4c02";
+    "#993404";
+    "#662506";
+  |]
+
 let colors_ylorrd8 =
   [|
     "#ffffcc";
@@ -212,26 +227,37 @@ let attrs_with_fillcolor_for_size size attrs =
   let i = min (max 0 i) (n - 1) in
     ("fillcolor", scheme.(i)) :: attrs
 
+let attrs_with_color c attrs =
+  ("color", c) :: attrs
+
 let attrs_with_color_for_tag t attrs =
   match t with
     | Lazy
-    | Closure
+    | Closure ->
+	attrs_with_color "mangenta" attrs
 
     | Infix
-    | Forward
+    | Forward ->
+	attrs_with_color "green" attrs
 
-    | Object
-    | Block
-    | Double_array
+    | Object ->
+	attrs_with_color "green" attrs
+    | Block ->
+	attrs
 
-    | Abstract
     | String
     | Double
-    | Custom
+    | Double_array ->
+	attrs_with_color "blue" attrs
+
+    | Abstract
+    | Custom ->
+	attrs_with_color "red" attrs
 
     | Int
     | Out_of_heap
-    | Unaligned -> attrs
+    | Unaligned ->
+	attrs
 
 let default_dot_context =
 object
@@ -246,6 +272,7 @@ object
   method all_nodes_attrs =
     [
       "shape", "record";
+      "penwidth", "2.0";
       "style", "rounded, filled"
     ]
 
@@ -259,8 +286,9 @@ object
     let attrs = 
       if root then [ "penwidth", "4.0" ] else []
     in
-    let attrs = ("label", label) :: attrs in
-      attrs_with_fillcolor_for_size size attrs
+      ("label", label) :: attrs
+      >>> attrs_with_fillcolor_for_size size
+      >>> attrs_with_color_for_tag t
 
   method edge_attrs ~field st dt =
     [ "label", string_of_int field ]
@@ -495,31 +523,30 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
       match t with
 	| _ when tag r < no_scan_tag && expand ->
 	    for i = 0 to min max_size (n - 1) do
-	      if i < max_size then
+	      if i = max_size then
+		bprintf b "| ..."
+	      else
 		let f = field r i in
 		let x = tag_of_value f in
 		let desc = value_description f x in
 		  bprintf b "| %s" desc
-	      else
-		bprintf b "| ...";
 	    done
 	| Double_array when expand ->
 	    assert (tag r = double_array_tag);
 	    let a = magic r in
 	    let n = Array.length a in
 	      for i = 0 to min max_size (n - 1) do
-		if i < max_size then
+		if i = max_size then
+		  bprintf b "| ..."
+		else
 		  bprintf b "| %s" (value_description a.(i) Double)
-		else (
-		  bprintf b "| ...";
-		)
 	      done
-	| Abstract when expand ->
+	| Custom | Abstract when expand ->
 	    for i = 0 to min max_size (n - 1) do
-	      if i < max_size then
-		bprintf b "| %s" value_unknown
-	      else
+	      if i = max_size then
 		bprintf b "| ..."
+	      else
+		bprintf b "| %s" value_mnemonic_unknown
 	    done
 	| _ ->
 	    ()
@@ -627,7 +654,7 @@ let heap_size ?(tags=Tags.all) ?(follow=Tags.all) o =
 
 (*----------------------------------------------------------------------------*)
 
-let test_data () =
+let rec test_data () =
   let rec l = 1 :: 2 :: 3 :: 4 :: 5 :: 6 :: 7 :: l in
   let rec drop l i =
     if i = 0 then
@@ -643,10 +670,11 @@ let test_data () =
   let data = 
     (l, (1,2), [|3; 4|], flush, 1.0, [|2.0; 3.0|],
      (Tags.all, Tags.remove Closure Tags.all),
-     ("Hello world", lazy (3 + 5)), g, f, ("STRING", "STRING"),
+     ("Hello world", lazy (3 + 5)), g, f, let s = "STRING" in (s, "STRING", s),
      Array.init 20 (drop l),
+     (default_dump_context, default_dot_context),
      stdout,
-    [Array.make 10 0; Array.make 100 0; Array.make 1000 0; Array.make 1000000 0; Array.make 10000000 0])
+    [Array.make 10 0; Array.make 100 0; Array.make 1000 0; Array.make 1000000 0])
   in
     repr data
 
