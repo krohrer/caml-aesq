@@ -83,7 +83,7 @@ struct
     ]
 end
 
-let tag_of_value r =
+let value_tag r =
   match tag r with
     | x when x = lazy_tag -> Lazy
     | x when x = closure_tag -> Closure
@@ -101,12 +101,12 @@ let tag_of_value r =
     | x when x = unaligned_tag -> Unaligned
     | x -> failwith (sprintf "OCaml value with unknown tag = %d" x)
 
-let size_of_value r =
-  match tag r with
-    | x when x = int_tag || x = out_of_heap_tag || x = unaligned_tag ->
-	0
-    | _ ->
-	size r
+let value_in_heap r =
+  let x = tag r in
+    not (x = int_tag || x = out_of_heap_tag || x = unaligned_tag)
+
+let value_size r =
+  if value_in_heap r then size r else 0
 
 let value_mnemonic r t = 
   match t with
@@ -128,37 +128,42 @@ let value_mnemonic r t =
 let value_mnemonic_unknown =
   "????"
 
-let value_abbrev r t =
-  match t with
-    | Double | Int | Out_of_heap | Unaligned ->
-	value_mnemonic r t
-    | Lazy | Closure | Object | Infix | Forward | Block | Abstract | Custom ->
-	sprintf "%s:%d" (value_mnemonic r t) (size r)
-    | Double_array ->
-	sprintf "%s:%d" (value_mnemonic r t) (Array.length (magic r))
-    | String ->
-	sprintf "%s:%d" (value_mnemonic r t) (String.length (magic r))
-
 let value_description r t =
+  let string_ellipsis = "[..]" in
   let string_max_length = 8 in
+  let string_cutoff = 4 in
     match t with
-      | Lazy | Forward ->
-	  value_mnemonic r t
       | Double ->
 	  string_of_float (magic r)
+
       | Int ->
 	  string_of_int (magic r)
-      | Out_of_heap | Unaligned ->
+
+      | Out_of_heap
+      | Unaligned ->
 	  sprintf "0x%nX" (addr r)
-      | Custom | Block | Closure | Object | Infix | Abstract | Double_array ->
-	  value_abbrev r t
+
+      | Lazy 
+      | Forward
+      | Custom 
+      | Block 
+      | Closure 
+      | Object 
+      | Infix 
+      | Abstract ->
+	    sprintf "#%d" (size r)
+
+      | Double_array ->
+	  sprintf "#%d" (Array.length (magic r))
+
       | String ->
 	  let s = magic r in
 	  let l = String.length s in
 	    if l > string_max_length then
-		sprintf "%S" (String.sub s 0 string_max_length ^ "[..]")
+	      let s' = String.sub s 0 string_cutoff ^ string_ellipsis in
+		sprintf "#%d, %S" l s'
 	    else
-	      sprintf "%S" s
+	      sprintf "#%d, %S" l s
 
 (*----------------------------------------------------------------------------*)
 
@@ -169,7 +174,7 @@ object
   method graph_attrs : dot_attrs
   method all_nodes_attrs : dot_attrs
   method all_edges_attrs : dot_attrs
-  method node_attrs : ?root:bool -> size:int -> string -> tag -> dot_attrs
+  method node_attrs : ?root:bool -> label:string -> Obj.t -> dot_attrs
   method edge_attrs : field:int -> tag -> tag -> dot_attrs
 
   method should_expand_node : size:int -> tag -> bool
@@ -220,6 +225,19 @@ let colors_ylorrd8 =
     "#b10026";
   |]
 
+let colors_set19 =
+  [|
+    "#e41a1c";
+    "#377eb8";
+    "#4daf4a";
+    "#984ea3";
+    "#ff7f00";
+    "#ffff33";
+    "#a65628";
+    "#f781bf";
+    "#999999";
+  |]
+
 let attrs_with_fillcolor_for_size size attrs =
   let scheme = colors_orrd8 in
   let n = Array.length scheme in
@@ -230,34 +248,37 @@ let attrs_with_fillcolor_for_size size attrs =
 let attrs_with_color c attrs =
   ("color", c) :: attrs
 
+let attrs_with_penwidth w attrs =
+  ("penwidth", string_of_float w) :: attrs
+
 let attrs_with_color_for_tag t attrs =
   match t with
-    | Lazy
-    | Closure ->
-	attrs_with_color "mangenta" attrs
 
     | Infix
     | Forward ->
-	attrs_with_color "green" attrs
+	attrs_with_color colors_set19.(4) attrs
 
+    | Lazy
+    | Closure
     | Object ->
-	attrs_with_color "green" attrs
+	attrs_with_color colors_set19.(3) attrs
+
     | Block ->
-	attrs
-
-    | String
-    | Double
-    | Double_array ->
-	attrs_with_color "blue" attrs
-
-    | Abstract
-    | Custom ->
-	attrs_with_color "red" attrs
+	attrs_with_penwidth 1.0	attrs
 
     | Int
     | Out_of_heap
-    | Unaligned ->
-	attrs
+    | Unaligned
+    | String ->
+	attrs_with_color colors_set19.(2) attrs
+
+    | Double
+    | Double_array ->
+	attrs_with_color colors_set19.(1) attrs
+
+    | Abstract
+    | Custom ->
+	attrs_with_color colors_set19.(0) attrs
 
 let default_dot_context =
 object
@@ -282,13 +303,13 @@ object
       "arrowtail", "odot"
     ]
 
-  method node_attrs ?(root=false) ~size label t =
+  method node_attrs ?(root=false) ~label r =
     let attrs = 
       if root then [ "penwidth", "4.0" ] else []
     in
       ("label", label) :: attrs
-      >>> attrs_with_fillcolor_for_size size
-      >>> attrs_with_color_for_tag t
+      >>> attrs_with_fillcolor_for_size (value_size r)
+      >>> attrs_with_color_for_tag (value_tag r)
 
   method edge_attrs ~field st dt =
     [ "label", string_of_int field ]
@@ -329,7 +350,7 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
     try
       id_find r
     with Not_found -> (
-      let t = tag_of_value r in
+      let t = value_tag r in
       let tid = value_mnemonic r t in
       let n = HT.length value2id in
       let id = sprintf "%s/%X" tid n in
@@ -352,27 +373,55 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
   and sexpr_ref fmt id =
     fprintf fmt "@@%s" id
 
-  and sexpr_value_description fmt r t =
-    pp_print_string fmt (value_description r t)
+  and sexpr_string fmt s =
+    fprintf fmt "%S" s
 
-  and sexpr_value_mnemonic fmt r t =
+  and sexpr_float fmt f =
+    fprintf fmt "%f" f
+
+  and sexpr_int fmt i =
+    fprintf fmt "%d" i
+
+  and sexpr_addr fmt a =
+    fprintf fmt "0x%nX" a
+
+  and sexpr_opaque fmt r t =
+    sexpr_open fmt (value_mnemonic r t);
+    sexpr_sep fmt ();
+    sexpr_int fmt (size r);
+    sexpr_close fmt ()
+
+  and sexpr_mnemonic fmt r t =
     pp_print_string fmt (value_mnemonic r t)
   in
 
   let rec sexpr_value ~depth fmt r =
-    let t = tag_of_value r in
+    let t = value_tag r in
     let expand = context#should_expand t in
-      match t with
-	| Lazy | Closure | Object | Infix | Forward | Block when expand ->
-	    sexpr_block ~depth fmt r t sexpr_block_body
-	| Abstract | Custom | Double when expand ->
-	    sexpr_block ~depth fmt r t sexpr_description_body
-	| Double_array when expand ->
-	    sexpr_block ~depth fmt r t sexpr_double_array_body
-	| x when expand ->
-	    sexpr_value_description fmt r t
-	| x ->
-	    sexpr_value_mnemonic fmt r t
+      if not expand then
+	sexpr_mnemonic fmt r t
+      else
+	match t with
+	  | Lazy 
+	  | Closure 
+	  | Object 
+	  | Infix 
+	  | Forward 
+	  | Block ->
+	      sexpr_block ~depth fmt r t sexpr_block_body
+	  | Abstract
+	  | Custom ->
+	      sexpr_opaque fmt r t
+	  | Double_array ->
+	      sexpr_block ~depth fmt r t sexpr_double_array_body
+	  | Unaligned | Out_of_heap ->
+	      sexpr_addr fmt (addr r)
+	  | Double ->
+	      sexpr_float fmt (magic r : float)
+	  | Int ->
+	      sexpr_int fmt (magic r : int)
+	  | String ->
+	      sexpr_string fmt (magic r : string)
 
   and sexpr_block ~depth fmt r t body =
     try
@@ -401,17 +450,13 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
 	sexpr_value ~depth:(depth + 1) fmt (field r i)
       done
 
-  and sexpr_description_body ~depth fmt r t =
-    sexpr_sep fmt ();
-    sexpr_value_description fmt r t
-
   and sexpr_double_array_body ~depth fmt r _ =
     assert (tag r = double_array_tag);
     let a = magic r in
     let n = Array.length a in
       for i = 0 to n - 1 do
 	sexpr_sep fmt ();
-	sexpr_description_body ~depth fmt a.(i) Double
+	sexpr_float fmt a.(i)
       done
   in
 
@@ -462,7 +507,7 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   let rec value2id = HT.create 31337
   and id_of_value r =
     try id_find r with Not_found -> (
-      let t = tag_of_value r in
+      let t = value_tag r in
       let id = sprintf "%s_%d" (value_mnemonic r t) (HT.length value2id) in
 	HT.add value2id r id;
 	id
@@ -514,61 +559,63 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   in
 
   let value_to_label_and_links id t r =
-    (* TODO : Generate labels first, then collect links. *)
-    let n = size_of_value r in
     let max_size = context#max_size in
-    let expand = context#should_expand_node ~size:n t in
+    let expand = context#should_expand_node ~size:(value_size r) t in
     let bprint b =
-      Buffer.add_string b (value_abbrev r t);
+      Buffer.add_string b (value_mnemonic r t);
+      if expand then (
+	Buffer.add_string b " ";
+	Buffer.add_string b (value_description r t)
+      );
       match t with
 	| _ when tag r < no_scan_tag && expand ->
-	    for i = 0 to min max_size (n - 1) do
-	      if i = max_size then
-		bprintf b "| ..."
-	      else
-		let f = field r i in
-		let x = tag_of_value f in
-		let desc = value_description f x in
-		  bprintf b "| %s" desc
-	    done
+	    let n = size r in
+	    let n' = min max_size n in
+	      for i = 0 to n' - 1 do
+		if i = max_size then
+		  bprintf b "| ..."
+		else
+		  let f = field r i in
+		  let x = value_tag f in
+		  let desc = value_description f x in
+		    bprintf b "| %s" desc
+	      done
 	| Double_array when expand ->
-	    assert (tag r = double_array_tag);
 	    let a = magic r in
 	    let n = Array.length a in
-	      for i = 0 to min max_size (n - 1) do
+	    let n' = min max_size n in
+	      for i = 0 to n' - 1 do
 		if i = max_size then
 		  bprintf b "| ..."
 		else
 		  bprintf b "| %s" (value_description a.(i) Double)
 	      done
 	| Custom | Abstract when expand ->
-	    for i = 0 to min max_size (n - 1) do
-	      if i = max_size then
-		bprintf b "| ..."
-	      else
-		bprintf b "| %s" value_mnemonic_unknown
-	    done
+	    let n = size r in
+	    let n' = min max_size n in
+	      for i = 0 to n' - 1 do
+		if i = max_size then
+		  bprintf b "| ..."
+		else
+		  bprintf b "| %s" value_mnemonic_unknown
+	      done
 	| _ ->
 	    ()
     in
     let links =
       if tag r < no_scan_tag && expand then
 	let rl = ref [] in
+	let n = size r in
 	  for i = 0 to n - 1 do
 	    let f = field r i in
-	    let x = tag_of_value f in
-	      match x with 
-		| Int | Out_of_heap | Unaligned ->
-		    ()
-		| _ when context#should_follow_edge ~field:i t x ->
-		  let fid =
-		    try id_find f with Not_found ->
-		      Queue.push f queue;
-		      id_of_value f
-		  in
-		    rl := (id, t, i, fid, x) :: !rl
-		| _ ->
-		    ()
+	    let x = value_tag f in
+	      if value_in_heap f && context#should_follow_edge ~field:i t x then
+		let fid =
+		  try id_find f with Not_found ->
+		    Queue.push f queue;
+		    id_of_value f
+		in
+		  rl := (id, t, i, fid, x) :: !rl
 	  done;
 	  !rl
       else
@@ -578,10 +625,9 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   in
 
   let rec value_one ?(root=false) fmt id r =
-    let t = tag_of_value r in
+    let t = value_tag r in
     let label, links = value_to_label_and_links id t r in
-    let size = if tag r < no_scan_tag then size r else 0 in
-    let node_attrs = context#node_attrs ~root ~size label t in
+    let node_attrs = context#node_attrs ~root ~label r in
     let aux (id, st, i, fid, dt) = 
       let edge_attrs = context#edge_attrs ~field:i st dt in
 	link_one fmt id i fid edge_attrs
@@ -631,7 +677,7 @@ let heap_size ?(tags=Tags.all) ?(follow=Tags.all) o =
     Stack.push (repr o) candidates;
     while has_candidates () do
       let r = next_candidate () in
-      let t = tag_of_value r in
+      let t = value_tag r in
 	match t with
 	  | Lazy | Closure | Object | Infix | Forward | Block as x ->
 	      let n = size r in
@@ -668,7 +714,9 @@ let rec test_data () =
     f (y :: l)
   in
   let data = 
-    (l, (1,2), [|3; 4|], flush, 1.0, [|2.0; 3.0|],
+    ([|1|], l, (1,2), [|3; 4|], flush, 1.0, [|2.0; 3.0|],
+     printf,
+     String.make 1000000 'a',
      (Tags.all, Tags.remove Closure Tags.all),
      ("Hello world", lazy (3 + 5)), g, f, let s = "STRING" in (s, "STRING", s),
      Array.init 20 (drop l),
@@ -678,4 +726,7 @@ let rec test_data () =
   in
     repr data
 
+let test () = dot_osx (test_data ());
+
 (*----------------------------------------------------------------------------*)
+

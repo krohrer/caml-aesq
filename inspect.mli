@@ -30,7 +30,7 @@ object
   method graph_attrs : dot_attrs
   method all_nodes_attrs : dot_attrs
   method all_edges_attrs : dot_attrs
-  method node_attrs : ?root:bool -> size:int -> string -> tag -> dot_attrs
+  method node_attrs : ?root:bool -> label:string -> Obj.t -> dot_attrs
   method edge_attrs : field:int -> tag -> tag -> dot_attrs
 
   method should_expand_node : size:int -> tag -> bool
