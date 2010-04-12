@@ -175,10 +175,10 @@ object
   method all_nodes_attrs : dot_attrs
   method all_edges_attrs : dot_attrs
   method node_attrs : ?root:bool -> label:string -> Obj.t -> dot_attrs
-  method edge_attrs : field:int -> tag -> tag -> dot_attrs
+  method edge_attrs : src:Obj.t -> field:int -> dst:Obj.t -> dot_attrs
 
-  method should_expand_node : size:int -> tag -> bool
-  method should_follow_edge : field:int -> tag -> tag -> bool
+  method should_expand_node : Obj.t -> bool
+  method should_follow_edge : src:Obj.t -> field:int -> dst:Obj.t -> bool
   method max_size : int
 end
 
@@ -238,6 +238,12 @@ let colors_set19 =
     "#999999";
   |]
 
+let attrs_with_color c attrs =
+  ("color", c) :: attrs
+
+let attrs_with_penwidth w attrs =
+  ("penwidth", string_of_float w) :: attrs
+
 let attrs_with_fillcolor_for_size size attrs =
   let scheme = colors_orrd8 in
   let n = Array.length scheme in
@@ -245,15 +251,8 @@ let attrs_with_fillcolor_for_size size attrs =
   let i = min (max 0 i) (n - 1) in
     ("fillcolor", scheme.(i)) :: attrs
 
-let attrs_with_color c attrs =
-  ("color", c) :: attrs
-
-let attrs_with_penwidth w attrs =
-  ("penwidth", string_of_float w) :: attrs
-
 let attrs_with_color_for_tag t attrs =
   match t with
-
     | Infix
     | Forward ->
 	attrs_with_color colors_set19.(4) attrs
@@ -280,7 +279,12 @@ let attrs_with_color_for_tag t attrs =
     | Custom ->
 	attrs_with_color colors_set19.(0) attrs
 
-let default_dot_context =
+let attrs_for_value r attrs =
+  attrs
+  >>> attrs_with_fillcolor_for_size (value_size r)
+  >>> attrs_with_color_for_tag (value_tag r)
+
+let default_dot_context : dot_context =
 object
   method graph_attrs =
     [
@@ -307,19 +311,17 @@ object
     let attrs = 
       if root then [ "penwidth", "4.0" ] else []
     in
-      ("label", label) :: attrs
-      >>> attrs_with_fillcolor_for_size (value_size r)
-      >>> attrs_with_color_for_tag (value_tag r)
+      ("label", label) :: attrs >>> attrs_for_value r
 
-  method edge_attrs ~field st dt =
+  method edge_attrs ~src ~field ~dst =
     [ "label", string_of_int field ]
 
-  method should_expand_node ~size t = true
-  method should_follow_edge ~field t x = true
+  method should_expand_node r = true
+  method should_follow_edge ~src ~field ~dst = true
   method max_size = 5
 end
 
-let default_dump_context =
+let default_dump_context : dump_context =
 object
   method should_expand t = true
   method max_depth = 20
@@ -558,9 +560,10 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
       List.iter (fun (k,v) -> attr_one fmt k v) (List.rev attrs)
   in
 
-  let value_to_label_and_links id t r =
+  let value_to_label_and_links id r =
+    let t = value_tag r in
     let max_size = context#max_size in
-    let expand = context#should_expand_node ~size:(value_size r) t in
+    let expand = context#should_expand_node r in
     let bprint b =
       Buffer.add_string b (value_mnemonic r t);
       if expand then (
@@ -608,14 +611,10 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
 	let n = size r in
 	  for i = 0 to n - 1 do
 	    let f = field r i in
-	    let x = value_tag f in
-	      if value_in_heap f && context#should_follow_edge ~field:i t x then
-		let fid =
-		  try id_find f with Not_found ->
-		    Queue.push f queue;
-		    id_of_value f
-		in
-		  rl := (id, t, i, fid, x) :: !rl
+	      if value_in_heap f && context#should_follow_edge ~src:r ~field:i ~dst:f then (
+		let _ = try ignore (id_find f) with Not_found -> Queue.push f queue in
+		  rl := (r, i, f) :: !rl
+	      )
 	  done;
 	  !rl
       else
@@ -625,11 +624,11 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   in
 
   let rec value_one ?(root=false) fmt id r =
-    let t = value_tag r in
-    let label, links = value_to_label_and_links id t r in
+    let label, links = value_to_label_and_links id r in
     let node_attrs = context#node_attrs ~root ~label r in
-    let aux (id, st, i, fid, dt) = 
-      let edge_attrs = context#edge_attrs ~field:i st dt in
+    let aux (src, i, dst) = 
+      let edge_attrs = context#edge_attrs ~src ~field:i ~dst in
+      let id = id_of_value src and fid = id_of_value dst in
 	link_one fmt id i fid edge_attrs
     in
       node_one fmt id node_attrs;
@@ -715,13 +714,12 @@ let rec test_data () =
   in
   let data = 
     ([|1|], l, (1,2), [|3; 4|], flush, 1.0, [|2.0; 3.0|],
-     printf,
      String.make 1000000 'a',
      (Tags.all, Tags.remove Closure Tags.all),
      ("Hello world", lazy (3 + 5)), g, f, let s = "STRING" in (s, "STRING", s),
      Array.init 20 (drop l),
-     (default_dump_context, default_dot_context),
      stdout,
+     (object method blah = 3 val brog = 4 end),
     [Array.make 10 0; Array.make 100 0; Array.make 1000 0; Array.make 1000000 0])
   in
     repr data
