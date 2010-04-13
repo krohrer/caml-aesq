@@ -21,7 +21,7 @@ let string_with_buffer n =
     )
 
 let addr r =
-  let h = Nativeint.of_int (magic r land max_int) in
+  let h = Nativeint.of_int ((magic r : int) land max_int) in
     Nativeint.add h h
       (* according to ${OCAMLSRC}/byterun/mlvalues.h, integers always
 	 have the LSB set, and only the upper (Sys.word_size - 1) bits
@@ -32,6 +32,7 @@ let addr r =
 	 a proper int of it and then multiply by 2. *)
 
 let (>>>) x f = f x
+let ($) f x = f x
 
 (*------------------------------------*)
 
@@ -108,62 +109,26 @@ let value_in_heap r =
 let value_size r =
   if value_in_heap r then size r else 0
 
-let value_mnemonic r t = 
-  match t with
-    | Lazy -> "LAZY"
-    | Closure -> "CLOS"
-    | Object -> "OBJ"
-    | Infix -> "INFX"
-    | Forward -> "FWD"
-    | Block -> sprintf "BL%d" (tag r)
-    | Abstract -> "ABST"
-    | String -> "STR"
-    | Double -> "DBL"
-    | Double_array -> "DBLA"
-    | Custom -> "CUST"
-    | Int -> "INT"
-    | Out_of_heap -> "OADR"
-    | Unaligned -> "UADR"
+let value_mnemonic ?t r = 
+  let t = match t with None -> value_tag r | Some x -> x in
+    match t with
+      | Lazy -> "LAZY"
+      | Closure -> "CLOS"
+      | Object -> "OBJ"
+      | Infix -> "INFX"
+      | Forward -> "FWD"
+      | Block -> sprintf "BL%d" (tag r)
+      | Abstract -> "ABST"
+      | String -> "STR"
+      | Double -> "DBL"
+      | Double_array -> "DBLA"
+      | Custom -> "CUST"
+      | Int -> "INT"
+      | Out_of_heap -> "OADR"
+      | Unaligned -> "UADR"
 
 let value_mnemonic_unknown =
   "????"
-
-let value_description r t =
-  let string_ellipsis = "[..]" in
-  let string_max_length = 8 in
-  let string_cutoff = 4 in
-    match t with
-      | Double ->
-	  string_of_float (magic r)
-
-      | Int ->
-	  string_of_int (magic r)
-
-      | Out_of_heap
-      | Unaligned ->
-	  sprintf "0x%nX" (addr r)
-
-      | Lazy 
-      | Forward
-      | Custom 
-      | Block 
-      | Closure 
-      | Object 
-      | Infix 
-      | Abstract ->
-	    sprintf "#%d" (size r)
-
-      | Double_array ->
-	  sprintf "#%d" (Array.length (magic r))
-
-      | String ->
-	  let s = magic r in
-	  let l = String.length s in
-	    if l > string_max_length then
-	      let s' = String.sub s 0 string_cutoff ^ string_ellipsis in
-		sprintf "#%d, %S" l s'
-	    else
-	      sprintf "#%d, %S" l s
 
 (*----------------------------------------------------------------------------*)
 
@@ -188,101 +153,55 @@ object
   method max_depth : int
 end
 
-let colors_orrd8 =
-  [|
-    "#fff7ec";
-    "#fee8c8";
-    "#fdd49e";
-    "#fdbb84";
-    "#fc8d59";
-    "#ef6548";
-    "#d7301f";
-    "#990000";
-  |]
+(* See http://www.graphviz.org/doc/info/colors.html for more info. *)
 
-let colors_ylgnbu9 =
-  [|
-    "#ffffe5";
-    "#fff7bc";
-    "#fee391";
-    "#fec44f";
-    "#fe9929";
-    "#ec7014";
-    "#cc4c02";
-    "#993404";
-    "#662506";
-  |]
-
-let colors_ylorrd8 =
-  [|
-    "#ffffcc";
-    "#ffeda0";
-    "#fed976";
-    "#feb24c";
-    "#fd8d3c";
-    "#fc4e2a";
-    "#e31a1c";
-    "#b10026";
-  |]
-
-let colors_set19 =
-  [|
-    "#e41a1c";
-    "#377eb8";
-    "#4daf4a";
-    "#984ea3";
-    "#ff7f00";
-    "#ffff33";
-    "#a65628";
-    "#f781bf";
-    "#999999";
-  |]
-
-let attrs_with_color c attrs =
-  ("color", c) :: attrs
-
-let attrs_with_penwidth w attrs =
-  ("penwidth", string_of_float w) :: attrs
-
-let attrs_with_fillcolor_for_size size attrs =
-  let scheme = colors_orrd8 in
-  let n = Array.length scheme in
-  let i = int_of_float (log (float_of_int (size + 1)) /. log 10.) in
-  let i = min (max 0 i) (n - 1) in
-    ("fillcolor", scheme.(i)) :: attrs
-
-let attrs_with_color_for_tag t attrs =
-  match t with
-    | Infix
-    | Forward ->
-	attrs_with_color colors_set19.(4) attrs
-
-    | Lazy
-    | Closure
-    | Object ->
-	attrs_with_color colors_set19.(3) attrs
-
-    | Block ->
-	attrs_with_penwidth 1.0	attrs
-
-    | Int
-    | Out_of_heap
-    | Unaligned
-    | String ->
-	attrs_with_color colors_set19.(2) attrs
-
-    | Double
-    | Double_array ->
-	attrs_with_color colors_set19.(1) attrs
-
-    | Abstract
-    | Custom ->
-	attrs_with_color colors_set19.(0) attrs
+let attrs_colorscheme_for_value ?(k=2.) ?lower ?upper color_scheme n r attrs =
+  let f2i = int_of_float and i2f = float_of_int in
+  let lower = match lower with None -> 1 | Some l -> l in
+  let upper = match upper with None -> n - 1 | Some u -> u in
+  let arcsinh x = log (x +. sqrt (x*.x +. 1.)) in
+  let x = i2f $ value_size r in
+  let y = f2i $ arcsinh ( x /. k ) in
+  let i = min upper (y + lower) in
+  let attrs = 
+    ("colorscheme", color_scheme ^ string_of_int n)
+    :: ("fillcolor", string_of_int i)
+    :: ("color", string_of_int n)
+    :: attrs
+  in
+    if i = n then
+      ("fontcolor", "white") :: attrs
+    else
+      attrs
 
 let attrs_for_value r attrs =
-  attrs
-  >>> attrs_with_fillcolor_for_size (value_size r)
-  >>> attrs_with_color_for_tag (value_tag r)
+  match value_tag r with
+    | Infix
+    | Forward ->
+	(* attrs_colorscheme_for_value "purples" 9 r attrs *)
+	attrs_colorscheme_for_value ~k:1.0 ~lower:2 "oranges" 9 r attrs
+
+    | Lazy
+    | Closure ->
+	attrs_colorscheme_for_value ~k:1.2 ~lower:2 "rdpu" 9 r attrs
+
+    | Object ->
+	attrs_colorscheme_for_value ~k:1.2 ~lower:2 "purples" 9 r attrs
+
+    | Block ->
+	attrs_colorscheme_for_value ~lower:2 "blues" 9 r attrs
+
+    | Int
+    | String
+    | Double
+    | Double_array ->
+  	attrs_colorscheme_for_value ~lower:2 "greens" 9 r attrs
+
+    | Out_of_heap
+    | Unaligned
+    | Abstract
+    | Custom ->
+	attrs_colorscheme_for_value ~k:1.0 ~lower:5 "reds" 9 r attrs
 
 let default_dot_context : dot_context =
 object
@@ -352,8 +271,7 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
     try
       id_find r
     with Not_found -> (
-      let t = value_tag r in
-      let tid = value_mnemonic r t in
+      let tid = value_mnemonic r in
       let n = HT.length value2id in
       let id = sprintf "%s/%X" tid n in
 	HT.add value2id r id;
@@ -388,13 +306,13 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
     fprintf fmt "0x%nX" a
 
   and sexpr_opaque fmt r t =
-    sexpr_open fmt (value_mnemonic r t);
+    sexpr_open fmt (value_mnemonic ~t r);
     sexpr_sep fmt ();
     sexpr_int fmt (size r);
     sexpr_close fmt ()
 
   and sexpr_mnemonic fmt r t =
-    pp_print_string fmt (value_mnemonic r t)
+    pp_print_string fmt (value_mnemonic ~t r)
   in
 
   let rec sexpr_value ~depth fmt r =
@@ -454,7 +372,7 @@ and dump_with_formatter ?(context=default_dump_context) fmt o =
 
   and sexpr_double_array_body ~depth fmt r _ =
     assert (tag r = double_array_tag);
-    let a = magic r in
+    let a : float array = magic r in
     let n = Array.length a in
       for i = 0 to n - 1 do
 	sexpr_sep fmt ();
@@ -510,7 +428,7 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
   and id_of_value r =
     try id_find r with Not_found -> (
       let t = value_tag r in
-      let id = sprintf "%s_%d" (value_mnemonic r t) (HT.length value2id) in
+      let id = sprintf "%s_%d" (value_mnemonic ~t r) (HT.length value2id) in
 	HT.add value2id r id;
 	id
     )
@@ -560,47 +478,96 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
       List.iter (fun (k,v) -> attr_one fmt k v) (List.rev attrs)
   in
 
+  let value_descr ?(long=false) r t =
+    let string_ellipsis = "[..]" in
+    let string_max_length = 8 in
+    let string_cutoff = 4 in
+      match value_tag r with
+	| Double as t ->
+	    let d : float = magic r in
+	      if long then
+		sprintf "%s %g" (value_mnemonic ~t r) d
+	      else
+		string_of_float d
+	| Int as t ->
+	    let i : int = magic r in
+	      if long then
+		sprintf "%s %d" (value_mnemonic ~t r) i
+	      else
+		string_of_int i
+	| Out_of_heap
+	| Unaligned as t ->
+	    if long then
+	      sprintf "%s 0x%nX" (value_mnemonic ~t r) (addr r)
+	    else
+	      sprintf "0x%nX" (addr r)
+	| Lazy 
+	| Forward
+	| Custom 
+	| Block 
+	| Closure 
+	| Object 
+	| Infix 
+	| Abstract as t ->
+	    sprintf "%s #%d" (value_mnemonic ~t r) (size r)
+	| Double_array ->
+	    let a : float array = magic r in
+	      sprintf "%s #%d" (value_mnemonic ~t r) (Array.length a)
+	| String ->
+	    let s : string = magic r in
+	    let l = String.length s in
+	    let s' =
+	      if l > string_max_length then
+		String.sub s 0 string_cutoff ^ string_ellipsis
+	      else
+		s
+	    in
+	      sprintf "%S#%d" s' l
+  in
+
   let value_to_label_and_links id r =
     let t = value_tag r in
     let max_size = context#max_size in
     let expand = context#should_expand_node r in
+    let bstr b s = Buffer.add_string b s
+    and bsep b () = Buffer.add_string b "| "
+    and brest b () = Buffer.add_string b "..."
+    in
     let bprint b =
-      Buffer.add_string b (value_mnemonic r t);
-      if expand then (
-	Buffer.add_string b " ";
-	Buffer.add_string b (value_description r t)
-      );
+      Buffer.add_string b $ value_descr ~long:true r t;
       match t with
 	| _ when tag r < no_scan_tag && expand ->
 	    let n = size r in
 	    let n' = min max_size n in
 	      for i = 0 to n' - 1 do
+		bsep b ();
 		if i = max_size then
-		  bprintf b "| ..."
+		  brest b ()
 		else
 		  let f = field r i in
 		  let x = value_tag f in
-		  let desc = value_description f x in
-		    bprintf b "| %s" desc
+		    bstr b $ value_descr f x
 	      done
 	| Double_array when expand ->
-	    let a = magic r in
+	    let a : float array = magic r in
 	    let n = Array.length a in
 	    let n' = min max_size n in
 	      for i = 0 to n' - 1 do
+		bsep b ();
 		if i = max_size then
-		  bprintf b "| ..."
+		  brest b ()
 		else
-		  bprintf b "| %s" (value_description a.(i) Double)
+		  bstr b $ string_of_float a.(i)
 	      done
 	| Custom | Abstract when expand ->
 	    let n = size r in
 	    let n' = min max_size n in
 	      for i = 0 to n' - 1 do
+		bsep b ();
 		if i = max_size then
-		  bprintf b "| ..."
+		  brest b ()
 		else
-		  bprintf b "| %s" value_mnemonic_unknown
+		  bstr b value_mnemonic_unknown
 	      done
 	| _ ->
 	    ()
@@ -712,15 +679,25 @@ let rec test_data () =
   and g y =
     f (y :: l)
   in
+  let o = object
+    val brog = 4
+    val brag = 51251
+    method blah = 3 
+    method foo () a = a
+  end in
   let data = 
     ([|1|], l, (1,2), [|3; 4|], flush, 1.0, [|2.0; 3.0|],
      String.make 1000000 'a',
      (Tags.all, Tags.remove Closure Tags.all),
      ("Hello world", lazy (3 + 5)), g, f, let s = "STRING" in (s, "STRING", s),
      Array.init 20 (drop l),
-     stdout,
-     (object method blah = 3 val brog = 4 end),
-    [Array.make 10 0; Array.make 100 0; Array.make 1000 0; Array.make 1000000 0])
+     stdout, printf, (o, default_dump_context, default_dot_context),
+     [String.make 10 'a'; String.make 100 'a'; String.make 1000 'a'; String.make 10000000 'a'],
+    [Array.make 1 1; Array.make 4 4; Array.make 16 16; Array.make 64 64; Array.make 256 256;
+     Array.make 1024 1024; Array.make 1000000 0],
+    [Array.make 1 1.; Array.make 4 4.; Array.make 16 16.; Array.make 64 64.; Array.make 256 256.;
+     Array.make 1024 1024.; Array.make 1000000 0.]
+    )
   in
     repr data
 
