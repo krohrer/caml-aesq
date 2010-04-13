@@ -3,6 +3,9 @@
 open Format
 open Obj
 
+let (>>>) x f = f x
+let ($) f x = f x
+
 module ValueRepr =
 struct
   type t = Obj.t
@@ -30,9 +33,6 @@ let addr r =
 	 want to print the bit-pattern (or address) of the value, we
 	 therefore have to make sure that the lower bit is one to make
 	 a proper int of it and then multiply by 2. *)
-
-let (>>>) x f = f x
-let ($) f x = f x
 
 (*------------------------------------*)
 
@@ -179,14 +179,14 @@ let attrs_for_value r attrs =
     | Infix
     | Forward ->
 	(* attrs_colorscheme_for_value "purples" 9 r attrs *)
-	attrs_colorscheme_for_value ~k:1.0 ~lower:2 "oranges" 9 r attrs
+	attrs_colorscheme_for_value ~lower:2 "ylorbr" 3 r attrs
 
     | Lazy
     | Closure ->
 	attrs_colorscheme_for_value ~k:1.2 ~lower:2 "rdpu" 9 r attrs
 
     | Object ->
-	attrs_colorscheme_for_value ~k:1.2 ~lower:2 "purples" 9 r attrs
+	attrs_colorscheme_for_value ~k:1.2 ~lower:4 "purples" 9 r attrs
 
     | Block ->
 	attrs_colorscheme_for_value ~lower:2 "blues" 9 r attrs
@@ -195,7 +195,7 @@ let attrs_for_value r attrs =
     | String
     | Double
     | Double_array ->
-  	attrs_colorscheme_for_value ~lower:2 "greens" 9 r attrs
+  	attrs_colorscheme_for_value ~lower:2 "bugn" 9 r attrs
 
     | Out_of_heap
     | Unaligned
@@ -237,7 +237,7 @@ object
 
   method should_expand_node r = true
   method should_follow_edge ~src ~field ~dst = true
-  method max_size = 5
+  method max_size = 20
 end
 
 let default_dump_context : dump_context =
@@ -539,9 +539,10 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
 	| _ when tag r < no_scan_tag && expand ->
 	    let n = size r in
 	    let n' = min max_size n in
+	    let cutoff = if n' = max_size then n' - 1 else max_int in
 	      for i = 0 to n' - 1 do
 		bsep b ();
-		if i = max_size then
+		if i = cutoff then
 		  brest b ()
 		else
 		  let f = field r i in
@@ -552,9 +553,10 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
 	    let a : float array = magic r in
 	    let n = Array.length a in
 	    let n' = min max_size n in
+	    let cutoff = if n' = max_size then n' - 1 else max_int in
 	      for i = 0 to n' - 1 do
 		bsep b ();
-		if i = max_size then
+		if i = cutoff then
 		  brest b ()
 		else
 		  bstr b $ string_of_float a.(i)
@@ -562,12 +564,28 @@ and dot_with_formatter ?(context=default_dot_context) fmt r =
 	| Custom | Abstract when expand ->
 	    let n = size r in
 	    let n' = min max_size n in
+	    let cutoff = if n' = max_size then n' - 1 else max_int in
 	      for i = 0 to n' - 1 do
 		bsep b ();
-		if i = max_size then
+		if i = cutoff then
 		  brest b ()
 		else
 		  bstr b value_mnemonic_unknown
+	      done
+	| String when expand ->
+	    let lsub = 16 in
+	    let s : string = magic r in
+	    let l = String.length s in
+	    let n' = min max_size ((l + lsub - 1) / lsub) in
+	    let cutoff = if n' = max_size then n' - 1 else max_int in
+	      for i = 0 to n' - 1 do
+		bsep b ();
+		if i = cutoff then
+		  brest b ()
+		else
+		  let isub = i * 16 in
+		  let len = min (String.length s - isub) lsub in
+		    bprintf b "%S" $ String.sub s isub len
 	      done
 	| _ ->
 	    ()
