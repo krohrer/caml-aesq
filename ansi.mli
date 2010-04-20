@@ -2,7 +2,7 @@
 
 (** ANSI Printing *)
 
-(** { 6 Low-level ANSI printing } *)
+(** Low-level ANSI printing *)
 
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
@@ -34,7 +34,7 @@ val printf : formatter -> ('a,unit,string,unit) format4 -> 'a
 
 val flush : formatter -> unit -> unit
 
-(** {6 Attributes} *)
+(** Attributes *)
 module Attributes :
 sig
   type t = attributes
@@ -63,7 +63,7 @@ sig
   val set_background : color -> t -> t
 end
 
-(** {6 High-level streams and printing} *)
+(** High-level streams and printing *)
 module Text :
 sig
   type size = int

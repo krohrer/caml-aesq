@@ -1,0 +1,4 @@
+description = "A pure text formatting library, with support for hyphenation and ANSI-codes"
+version = "0.1"
+archive(byte) = "inspect.cma"
+archive(native) = "inspect.cmxa"
