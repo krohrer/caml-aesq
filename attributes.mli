@@ -4,12 +4,14 @@ type t
 
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
+type justification = [`left | `center | `right | `block | `none]
 type underline = [`single | `none]
 
 val color_to_string : color -> string
 val intensity_to_string : intensity -> string
+val justification_to_string : justification -> string
 val underline_to_string : underline -> string
-val attributes_to_string : t -> string
+val attributes_to_string : attributes -> string
 
 val make :
   ?intensity:intensity ->
@@ -22,7 +24,7 @@ val make :
 
 val default : t
 
-type code
+type code = int
 val code_of_intensity  : intensity -> code
 val code_of_underline  : underline -> code
 val code_of_inverted   : bool -> code
