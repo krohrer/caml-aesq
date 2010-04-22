@@ -1,5 +1,7 @@
 (* Kaspar Rohrer, Fri Apr 23 00:11:58 CEST 2010 *)
 
+open ExtLib
+
 type justification = [`left | `center | `right | `block | `none]
 
 let justification_to_string =
@@ -12,13 +14,13 @@ let justification_to_string =
 
 type raw =
   | RFrag of string
-  | RAttr of attributes
+  | RAttr of Ansi.t
   | RBreak
   | RLineBreak
 
 type cooked =
   | CFrag of string
-  | CAttr of attributes
+  | CAttr of Ansi.t
   | CSpace of int
   | CSeq of cooked array
 
@@ -383,8 +385,8 @@ let justify_line fill width justification (elements, partial) =
 	    (line, width)
 
 let format
-    ?(attr=default_attributes)
-    ?(fill=default_attributes)
+    ?(attr=Ansi.default)
+    ?(fill=Ansi.default)
     ?(width=78)
     ?(just=`none)
     stream
@@ -414,8 +416,8 @@ let make_tab width stream =
   (stream, width)
 
 let rec tabulate
-    ?(attr=default_attributes) 
-    ?(fill=default_attributes)
+    ?(attr=Ansi.default) 
+    ?(fill=Ansi.default)
     streams
     =
   let streams = Array.of_list streams in
@@ -460,7 +462,7 @@ and tabulate_aux fill widths streams =
 (*----------------------------------------------------------------------------*)
 
 let rec pad
-    ?(fill=default_attributes)
+    ?(fill=Ansi.default)
     ?(left=1)
     ?(right=1)
     ?(top=1)
@@ -493,7 +495,7 @@ let rec pad
     ]
 
 let indent
-    ?(fill=default_attributes)
+    ?(fill=Ansi.default)
     left
     stream
     =
@@ -517,7 +519,7 @@ let rec dump_raw outc (lazy cell) =
 	  | RLineBreak -> 
 	      fprintf outc "LBR\n"
 	  | RAttr c ->
-	      fprintf outc "ATTRS(%s) " (attributes_to_string c)
+	      fprintf outc "ATTRS(%s) " (Ansi.to_string c)
 	end;
 	dump_raw outc stream
 
@@ -539,7 +541,7 @@ let dump outc =
       | CSpace n ->
 	  fprintf outc "SP(%d) " n
       | CAttr c ->
-	  fprintf outc "ATTRS(%s) " (attributes_to_string c)
+	  fprintf outc "ATTRS(%s) " (Ansi.to_string c)
       | CSeq elements ->
 	  fprintf outc "[[ ";
 	  Array.iter dump_element elements;
@@ -547,27 +549,30 @@ let dump outc =
   in
     dump_stream
 
-let print outc =
-  let fmt = Format.formatter_of_out_channel outc in
-  let rec print_stream (lazy cell) =
+let print ?(attr=Ansi.default) outc stream =
+  let rec print_stream attr (lazy cell) =
     match cell with
       | LazyStream.Nil ->
-	  flush outc
+	  ()
       | LazyStream.Cons ((elements,_), stream) ->
-	  
-	  Array.iter print_element elements;
-	  print_newline ansi ();
-	  print_stream stream
+	  let attr = Array.fold_left print_element attr elements in
+	    output_string outc "\n";
+	    print_stream attr stream
 
-  and print_element =
+  and print_element attr =
     function
       | CFrag f ->
-	  print_string ansi f
+	  output_string outc f;
+	  attr
       | CSpace n ->
-	  print_space ansi n
-      | CAttr c ->
-	  set_attributes ansi c
+	  for i = 0 to n-1 do output_string outc " " done;
+	  attr
+      | CAttr attr' ->
+	  let cs = Ansi.string_of_codes (Ansi.codes_of_transition attr attr') in
+	    output_string outc cs;
+	    attr'
       | CSeq elements ->
-	  Array.iter print_element elements
+	  Array.fold_left print_element attr elements
   in
-    print_stream
+    print_stream attr stream;
+    flush outc

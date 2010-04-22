@@ -9,7 +9,8 @@ type underline = [`single | `none]
 val color_to_string : color -> string
 val intensity_to_string : intensity -> string
 val underline_to_string : underline -> string
-val attributes_to_string : t -> string
+
+val to_string : t -> string
 
 val make :
   ?intensity:intensity ->
@@ -30,7 +31,7 @@ val code_of_blink      : bool -> code
 val code_of_foreground : color -> code
 val code_of_background : color -> code
 val to_codes : t -> code list
-val difference_to_codes : t -> t -> code list
+val codes_of_transition : t -> t -> code list
 val string_of_codes : code list -> string
 
 val intensity  : t -> intensity

@@ -59,8 +59,7 @@ val indent :
   size ->
   line LazyStream.t -> line LazyStream.t
 
-val print_with_formatter : Format.formatter -> line LazyStream.t -> unit
-val print : out_channel -> line LazyStream.t -> unit
+val print : ?attr:Ansi.t -> out_channel -> line LazyStream.t -> unit
 
 (**/**)
 

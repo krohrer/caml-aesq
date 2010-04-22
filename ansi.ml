@@ -36,7 +36,7 @@ let color_to_string =
     | `white -> "white"
     | `default -> "default"
 
-let attributes_to_string c =
+let to_string c =
   Printf.sprintf "{I=%s,U=%s,N=%b,B=%b,Fg=%s,Bg=%s}" 
     (intensity_to_string c.intensity)
     (underline_to_string c.underline)
@@ -115,7 +115,7 @@ let to_codes a =
   :: code_of_background a.background
   :: []
 
-let difference_to_codes a b =
+let codes_of_transition a b =
   let codes = ref [] in
   let aux c a b =
     if a <> b then
