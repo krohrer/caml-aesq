@@ -4,7 +4,7 @@ OCAMLMAKEFILE = ./OCamlMakefile
 
 RESULT = aesq
 
-PACKS = extlib
+PACKS = extlib inspect
 
 OCAMLFLAGS = -w Aelz
 LIB_PACK_NAME = $(RESULT)

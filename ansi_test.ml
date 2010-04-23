@@ -1,4 +1,6 @@
-open Ansi
+#use "topfind"
+#require "inspect"
+open Inspect
 
 let random_element arr =
     fun () ->
@@ -17,13 +19,13 @@ let random_word =
 
 let random_attributes =
   random_element [|
-    Attributes.make ();
-    Attributes.make ~intensity:`bold ();
-    Attributes.make ~underline:`single ();
-    Attributes.make ~foreground:`blue ~background:`yellow ();
-    Attributes.make ~background:`green ~underline:`single ();
-    Attributes.make ~foreground:`red ~inverted:true ~intensity:`bold ();
-    Attributes.make ~foreground:`magenta ~underline:`single ()
+    Ansi.make ();
+    Ansi.make ~intensity:`bold ();
+    Ansi.make ~underline:`single ();
+    Ansi.make ~foreground:`blue ~background:`yellow ();
+    Ansi.make ~background:`green ~underline:`single ();
+    Ansi.make ~foreground:`red ~inverted:true ~intensity:`bold ();
+    Ansi.make ~foreground:`magenta ~underline:`single ()
   |]
 
 let random_elem () =
@@ -47,10 +49,10 @@ let rec random_stream i n =
 
 let _ = 
   Random.self_init ();
-  let s1 = random_stream 0 (10000000) in
-  let s2 = random_stream 0 (7000000) in
-  let s3 = random_stream 0 (10000000) in
-  let fill = Attributes.make ~background:`blue () in
+  let s1 = random_stream 0 (1000000) in
+  let s2 = random_stream 0 (700000) in
+  let s3 = random_stream 0 (1000000) in
+  let fill = Ansi.make ~background:`blue () in
     (* Text.dump_raw stdout s1; *)
     let fb = Text.format ~fill ~width:60 ~just:`block s1 in
     let fc = Text.format ~fill ~width:40 ~just:`center s2 in
@@ -61,7 +63,7 @@ let _ =
       let tab =
 	LazyStream.flatten [
 	  Text.format ~fill ~width:180 ~just:`right (random_stream 0 10);
-	  Text.pad ~fill:(Attributes.make ~background:`red ()) ~left:4 ~right:4 ~top:2 ~bottom:2 (
+	  Text.pad ~fill:(Ansi.make ~background:`red ()) ~left:4 ~right:4 ~top:2 ~bottom:2 (
 	    Text.tabulate ~fill [
 	      Text.pad ~fill ~left:2 ~right:2 fb;
 	      Text.pad ~fill ~left:2 ~right:2 fc;
@@ -70,5 +72,10 @@ let _ =
 	  )
 	]
       in
-	Text.print std_formatter tab;
+      let f = Filename.temp_file "camldumpsexpr" ".txt" in
+	(* Inspect.Dot.dump_osx tab; *)
+	(* Inspect.Aux.with_file_out_channel f (fun c -> Text.print c tab); *)
+	Text.print stdout tab;
+	Printf.eprintf "\n%S\n%!" f;
 	()
+
