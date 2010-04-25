@@ -29,8 +29,8 @@ val make_line : cooked array -> line
 val line_width : line -> size
 val line_concat : line list -> line
 
-val width_of_first_line : line LazyStream.t -> size
-val max_width_over_all_lines : line LazyStream.t -> size
+val width_of_first_line : line LazyList.t -> size
+val max_width_over_all_lines : line LazyList.t -> size
 
 (** {6 Layout} *)
 
@@ -39,12 +39,12 @@ val format :
   ?fill:Ansi.t ->
   ?width:size ->
   ?just:justification ->
-  raw LazyStream.t -> line LazyStream.t
+  raw LazyList.t -> line LazyList.t
 
 val tabulate :
   ?attr:Ansi.t ->
   ?fill:Ansi.t ->
-  line LazyStream.t list -> line LazyStream.t
+  line LazyList.t list -> line LazyList.t
 
 val pad :
   ?fill:Ansi.t ->
@@ -52,19 +52,19 @@ val pad :
   ?right:size ->
   ?top:size ->
   ?bottom:size ->
-  line LazyStream.t -> line LazyStream.t
+  line LazyList.t -> line LazyList.t
 
 val indent :
   ?fill:Ansi.t ->
   size ->
-  line LazyStream.t -> line LazyStream.t
+  line LazyList.t -> line LazyList.t
 
-val print : ?attr:Ansi.t -> out_channel -> line LazyStream.t -> unit
+val print : ?attr:Ansi.t -> out_channel -> line LazyList.t -> unit
 
 (**/**)
 
 val justification_to_string : justification -> string
 
-val dump_raw : out_channel -> raw LazyStream.t -> unit
-val dump : out_channel -> line LazyStream.t -> unit
+val dump_raw : out_channel -> raw LazyList.t -> unit
+val dump : out_channel -> line LazyList.t -> unit
 

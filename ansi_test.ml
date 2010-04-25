@@ -1,6 +1,3 @@
-#use "topfind"
-#require "aseq"
-
 let random_element arr =
     fun () ->
       let i = Random.int (Array.length arr) in
@@ -51,27 +48,25 @@ let _ =
   let s1 = random_stream 0 (1000) in
   let s2 = random_stream 0 (700) in
   let s3 = random_stream 0 (1000) in
-  let nums01 = LazyList.take 7 (LazyList.forever "0123456789") in
+  let nums01 = LazyList.take 8 (LazyList.forever (Text.RFrag "0123456789")) in
   let fill = Ansi.make ~background:`blue () in
     (* Text.dump_raw stdout s1; *)
     let fb = Text.format ~fill ~width:25 ~just:`block s1 in
     let fc = Text.format ~fill ~width:20 ~just:`center s2 in
-    let fr = Text.format ~fill ~width:33 ~just:`right s3 in
+    let fr = Text.format ~fill ~width:30 ~just:`right s3 in
       ignore [fb; fc; fr];
       let tab =
 	LazyList.flatten [
 	  Text.format ~fill ~width:78 ~just:`right (random_stream 0 10);
-	  Text.pad ~fill:(Ansi.make ~background:`red ()) ~left:4 ~right:4 ~top:2 ~bottom:2 (
+	  Text.pad ~fill:(Ansi.make ~background:`red ()) ~left:1 ~right:0 ~top:1 ~bottom:0 (
 	    Text.tabulate ~fill [
-	      Text.pad ~fill ~left:2 ~right:2 fb;
-	      Text.pad ~fill ~left:2 ~right:2 fc;
-	      Text.pad ~fill ~left:2 ~right:2 fr
+	      Text.pad ~fill ~left:0 ~right:1 fb;
+	      Text.pad ~fill ~left:0 ~right:1 fc;
+	      Text.pad ~fill ~left:0 ~right:0 fr
 	    ]
 	  )
 	]
       in
-      let f = Filename.temp_file "camldumpsexpr" ".txt" in
-	Text.print stdout Text.format nums01;
+	Text.print stdout (Text.format nums01);
 	Text.print stdout tab;
-	Printf.eprintf "\n%S\n%!" f;
 	()

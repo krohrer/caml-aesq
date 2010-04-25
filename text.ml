@@ -78,14 +78,14 @@ and chop_aux width =
       (lazy cell)
       =
     match cell with
-      | LazyStream.Nil ->
+      | LazyList.Nil ->
 	  (* Done *)
 	  chop_done
 	    ~attributes
 	    ~line_rev
 	    ~dismissables
 	    ()
-      | LazyStream.Cons (x, stream) ->
+      | LazyList.Cons (x, stream) ->
 	  (* Dispatch *)
 	  begin match x with
 	    | RFrag _ as x ->
@@ -130,7 +130,7 @@ and chop_aux width =
 	~partial:true
 	(Option.default line_rev dismissables)
     in
-      LazyStream.Cons (line, LazyStream.nil)
+      LazyList.Cons (line, LazyList.nil)
 
   (* Chop fragment and justify line if necessary *)
   and chop_fragment
@@ -162,10 +162,10 @@ and chop_aux width =
 	  let frag_right = String.slice ~first:rem_width frag in
 	    (* Prefix stream for next line with left-overs
 	       from current line *)
-	    LazyStream.Cons (RFrag frag_right,
+	    LazyList.Cons (RFrag frag_right,
 			     stream)
 	in
-	  LazyStream.Cons (line,
+	  LazyList.Cons (line,
 			   lazy (chop_line
 				   ~attributes
 				   (lazy cell)))
@@ -179,9 +179,9 @@ and chop_aux width =
 	     pass it as an argument since it only gets used in this
 	     case. So we simply construct it anew. (Thank science we
 	     have immutable streams!) *)
-	  LazyStream.Cons (fragment, stream);
+	  LazyList.Cons (fragment, stream);
 	in
-	  LazyStream.Cons (line,
+	  LazyList.Cons (line,
 			   lazy (chop_line ~attributes (lazy cell)))
 
   (* Break: Ignore at the beginning of the line, or add it to dismissables. *)
@@ -220,7 +220,7 @@ and chop_aux width =
 	      let line =
 		make_chopped line_rev
 	      in
-		LazyStream.Cons (line,
+		LazyList.Cons (line,
 				 lazy (chop_line attributes stream))
 	| Some _ ->
 	    (* Already has dismissable break, ignore *)
@@ -242,7 +242,7 @@ and chop_aux width =
     let line = 
       make_chopped ~partial:true line_rev
     in
-      LazyStream.Cons (line,
+      LazyList.Cons (line,
 		       lazy (chop_line attributes stream))
 
   (* Set attributes: Update current attributes and add it to the other elements *)
@@ -392,25 +392,25 @@ let format
     stream
     =
   let chopped_stream = chop attr width stream in
-    LazyStream.map (justify_line fill width just) chopped_stream
+    LazyList.map (justify_line fill width just) chopped_stream
 
 (*----------------------------------------------------------------------------*)
 
 let max_width_over_all_lines stream =
   let aux m l = max m (line_width l) in
-    LazyStream.fold aux 0 stream
+    LazyList.fold aux 0 stream
 
 let width_of_first_line (lazy cell) =
   match cell with
-    | LazyStream.Nil -> 0
-    | LazyStream.Cons (x, stream) -> line_width x 
+    | LazyList.Nil -> 0
+    | LazyList.Cons (x, stream) -> line_width x 
 
 (*----------------------------------------------------------------------------*)
 
-type tab = line LazyStream.t * size
+type tab = line LazyList.t * size
 
 let empty_tab width =
-  (LazyStream.nil, width)
+  (LazyList.nil, width)
 
 let make_tab width stream =
   (stream, width)
@@ -439,22 +439,22 @@ and tabulate_aux fill widths streams =
     let elems = Array.make count (CSpace 0) in
       for i = 0 to count - 1 do
 	match Lazy.force streams.(i) with
-          | LazyStream.Nil ->
+          | LazyList.Nil ->
               elems.(i) <-
 		CSeq [|
 		  CAttr fill;
 		  CSpace widths.(i)
 		|]
-	  | LazyStream.Cons ((elements,width), s) ->
+	  | LazyList.Cons ((elements,width), s) ->
 	      widths.(i) <- width;
 	      exhausted := false;
 	      streams.(i) <- s;
 	      elems.(i) <- CSeq elements;
       done;
       if !exhausted then
-	LazyStream.Nil
+	LazyList.Nil
       else
-	LazyStream.Cons (make_line elems,
+	LazyList.Cons (make_line elems,
 			 Lazy.lazy_from_fun gen)
   in
     Lazy.lazy_from_fun gen
@@ -477,7 +477,7 @@ let rec pad
 	CSpace (width + left + right)
       |]
     in
-      LazyStream.forever fill_line
+      LazyList.forever fill_line
   in
   let aux (elems,_) =
     make_line [|
@@ -488,10 +488,10 @@ let rec pad
       CSpace right
     |]
   in
-    LazyStream.flatten [
-      LazyStream.take top filler;
-      LazyStream.map aux stream;
-      LazyStream.take bottom filler
+    LazyList.flatten [
+      LazyList.take top filler;
+      LazyList.map aux stream;
+      LazyList.take bottom filler
     ]
 
 let indent
@@ -507,10 +507,10 @@ open Printf
 
 let rec dump_raw outc (lazy cell) =
   match cell with
-    | LazyStream.Nil ->
+    | LazyList.Nil ->
 	fprintf outc "\n";
 	Pervasives.flush outc
-    | LazyStream.Cons (x, stream) ->
+    | LazyList.Cons (x, stream) ->
 	begin match x with
 	  | RFrag f ->
 	      fprintf outc "%S " f
@@ -526,10 +526,10 @@ let rec dump_raw outc (lazy cell) =
 let dump outc =
   let rec dump_stream (lazy cell) =
     match cell with
-      | LazyStream.Nil ->
+      | LazyList.Nil ->
 	  fprintf outc "\n";
 	  Pervasives.flush outc
-      | LazyStream.Cons ((elements,_), stream) ->
+      | LazyList.Cons ((elements,_), stream) ->
 	  Array.iter dump_element elements;
 	  fprintf outc "\n";
 	  dump_stream stream
@@ -552,9 +552,9 @@ let dump outc =
 let print ?(attr=Ansi.default) outc stream =
   let rec print_stream attr (lazy cell) =
     match cell with
-      | LazyStream.Nil ->
+      | LazyList.Nil ->
 	  ()
-      | LazyStream.Cons ((elements,_), stream) ->
+      | LazyList.Cons ((elements,_), stream) ->
 	  let attr = Array.fold_left print_element attr elements in
 	    output_string outc "\n";
 	    print_stream attr stream
