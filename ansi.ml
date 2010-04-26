@@ -13,6 +13,8 @@ and color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `whit
 and intensity = [`faint | `normal | `bold]
 and underline = [`single | `none]
 
+type sequence = string
+
 let intensity_to_string =
   function
     | `faint -> "faint"
@@ -131,7 +133,7 @@ let codes_of_transition a b =
     aux code_of_background a.background b.background;
     !codes
 
-let string_of_codes codes =
+let sequence_of_codes codes =
   let buf = Buffer.create 20 in
     (
       match codes with
@@ -145,6 +147,8 @@ let string_of_codes codes =
 	    Buffer.add_string buf "m"
     );
     Buffer.contents buf
+
+let reset_sequence = "\x1b[0m"
 
 let intensity a  = a.intensity
 let underline a  = a.underline

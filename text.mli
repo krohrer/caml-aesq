@@ -59,7 +59,16 @@ val indent :
   size ->
   line LazyList.t -> line LazyList.t
 
-val print : ?attr:Ansi.t -> out_channel -> line LazyList.t -> unit
+type printer
+
+val make_printer : ?ansi:bool -> out_channel -> printer
+
+val print_lines : printer -> line LazyList.t -> unit
+val print_newline : printer -> unit -> unit
+val print_string : printer -> string -> unit
+val print_ansi : printer -> Ansi.t -> unit
+val printf : printer -> ('a, unit, string, unit) format4 -> 'a
+val flush : printer -> unit
 
 (**/**)
 

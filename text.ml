@@ -499,7 +499,7 @@ let indent
     left
     stream
     =
-  pad ~fill ~left stream
+  pad ~fill ~left ~right:0 ~bottom:0 ~top:0 stream
 
 (*----------------------------------------------------------------------------*)
 
@@ -549,30 +549,70 @@ let dump outc =
   in
     dump_stream
 
-let print ?(attr=Ansi.default) outc stream =
-  let rec print_stream attr (lazy cell) =
+type printer = {
+  pr_ansi : bool;
+  mutable pr_attr : Ansi.t option;
+  mutable pr_outc : out_channel
+}
+
+let make_printer ?(ansi=true) outc =
+  {
+    pr_ansi = ansi;
+    pr_attr = None;
+    pr_outc = outc
+  }
+
+let printer_attributes pr =
+  pr.pr_attr
+
+let printer_set_attributes pr attr =
+  pr.pr_attr <- attr
+
+let print_string pr str =
+  output_string pr.pr_outc str
+
+let print_newline pr () =
+  output_string pr.pr_outc "\n"
+    
+let print_ansi pr attr =
+  let codes = 
+    match pr.pr_attr with 
+      | None -> Ansi.to_codes Ansi.default
+      | Some pr_attr -> Ansi.codes_of_transition pr_attr attr
+  in
+  let seq = Ansi.sequence_of_codes codes in
+    if pr.pr_ansi then print_string pr seq;
+    pr.pr_attr <- Some attr
+
+let printf pr fmt =
+  Printf.kprintf (print_string pr) fmt
+  
+let flush pr =
+  if pr.pr_ansi then output_string stdout Ansi.reset_sequence;
+  pr.pr_attr <- None;
+  flush pr.pr_outc;
+  ()
+
+let print_lines pr stream =
+  let rec print_stream (lazy cell) =
     match cell with
       | LazyList.Nil ->
 	  ()
       | LazyList.Cons ((elements,_), stream) ->
-	  let attr = Array.fold_left print_element attr elements in
-	    output_string outc "\n";
-	    print_stream attr stream
+	  Array.iter print_element elements;
+	  print_newline pr ();
+	  print_stream stream
 
-  and print_element attr =
+  and print_element =
     function
       | CFrag f ->
-	  output_string outc f;
-	  attr
+	  print_string pr f
       | CSpace n ->
-	  for i = 0 to n-1 do output_string outc " " done;
-	  attr
-      | CAttr attr' ->
-	  let cs = Ansi.string_of_codes (Ansi.codes_of_transition attr attr') in
-	    output_string outc cs;
-	    attr'
+	  for i = 0 to n-1 do print_string pr " " done
+      | CAttr attr ->
+	  print_ansi pr attr
       | CSeq elements ->
-	  Array.fold_left print_element attr elements
+	  Array.iter print_element elements
   in
-    print_stream attr stream;
-    flush outc
+    print_stream stream
+

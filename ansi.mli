@@ -1,6 +1,7 @@
 (* Kaspar Rohrer, Sat Mar 20 16:31:31 CET 2010 *)
 
 type t
+type sequence = string
 
 type color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
 type intensity = [`faint | `normal | `bold]
@@ -32,7 +33,8 @@ val code_of_foreground : color -> code
 val code_of_background : color -> code
 val to_codes : t -> code list
 val codes_of_transition : t -> t -> code list
-val string_of_codes : code list -> string
+val sequence_of_codes : code list -> sequence
+val reset_sequence : sequence
 
 val intensity  : t -> intensity
 val underline  : t -> underline
