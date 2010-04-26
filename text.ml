@@ -1,8 +1,11 @@
 (* Kaspar Rohrer, Fri Apr 23 00:11:58 CEST 2010 *)
 
-open ExtLib
-
 type justification = [`left | `center | `right | `block | `none]
+
+let option_default a opt =
+  match opt with
+    | None -> a
+    | Some a -> a
 
 let justification_to_string =
   function
@@ -128,7 +131,7 @@ and chop_aux width =
     let line =
       make_chopped
 	~partial:true
-	(Option.default line_rev dismissables)
+	(option_default line_rev dismissables)
     in
       LazyList.Cons (line, LazyList.nil)
 
@@ -148,18 +151,18 @@ and chop_aux width =
 	chop_line
 	  ~attributes
 	  ~rem_width:(rem_width - len)
-	  ~line_rev:(fragment :: Option.default line_rev dismissables)
+	  ~line_rev:(fragment :: option_default line_rev dismissables)
 	  stream
       else if len > width && rem_width >= min_width then
 	(* Fragment must be split anyway, may as well start on this
 	   line, if possible. It must always be possible if the line
 	   does not yet contain any printable elements. *)
 	let line =
-	  let frag_left = String.slice ~last:rem_width frag in
+	  let frag_left = String.sub frag 0 rem_width in
 	    make_chopped
-	      (RFrag frag_left :: Option.default line_rev dismissables)
+	      (RFrag frag_left :: option_default line_rev dismissables)
 	and cell =
-	  let frag_right = String.slice ~first:rem_width frag in
+	  let frag_right = String.sub frag rem_width (len - rem_width) in
 	    (* Prefix stream for next line with left-overs
 	       from current line *)
 	    LazyList.Cons (RFrag frag_right,
@@ -208,7 +211,7 @@ and chop_aux width =
 	       column, if there is still space left. *)
 	    if rem_width > 1 then
 	      let dismissables =
-		RBreak :: Option.default line_rev dismissables
+		RBreak :: option_default line_rev dismissables
 	      in
 		chop_line
 		  ~attributes
@@ -278,8 +281,7 @@ and chop_aux width =
       ?(partial=false)
       line_rev
       =
-    let line = Array.of_list line_rev in
-      Array.rev_in_place line;
+    let line = Array.of_list (List.rev line_rev) in
       line, partial
   in
     fun attributes stream -> lazy (chop_line ~attributes stream)

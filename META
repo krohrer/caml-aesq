@@ -1,4 +1,4 @@
-description = "A pure text formatting library, with support for hyphenation and ANSI-codes"
+description = "ANSI escape-sequences and text formatting."
 version = "0.1"
-archive(byte) = "inspect.cma"
-archive(native) = "inspect.cmxa"
+archive(byte) = "aesq.cma"
+archive(native) = "aesq.cmxa"

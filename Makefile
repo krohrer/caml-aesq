@@ -3,9 +3,7 @@
 OCAMLMAKEFILE = ./OCamlMakefile
 
 RESULT = aesq
-TEST = ansi_test
-
-PACKS = extlib
+TEST = test
 
 OCAMLFLAGS = -w Aelz
 LIB_PACK_NAME = $(RESULT)

@@ -16,17 +16,17 @@ OCaml ANSI escape-sequences and text formatting - caml-aesq
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 __ What is Aesq? _____________________________________________________
-A text formatting library, with support for hypenation and ANSI-codes.
 
 Aesq stands for ANSI escape-sequences. It's a small library that
-provides a clean interface (based on the notion of attributes) to
-generate ANSI escape-sequences. It also provides 
+provides a clean interface (based on the notion of text-attributes) to
+generate ANSI escape-sequences. It also supports text formatting with
+lazy lists composed of text elements.
 
 Aesq was originally written by Kaspar M. Rohrer
 (kaspar.rohrer@gmail.com)
 
 Caml-aesq is hosted on Github:
-  http://github.com/krohrer/caml-inspect/
+  http://github.com/krohrer/caml-aesq/
 
 __ Installation ______________________________________________________
 
@@ -46,18 +46,20 @@ And to uninstall it
 
 For development, you may instead run
 
-> sudo ln -s `pwd` `ocamlfind printconf path`/inspect
+> sudo ln -s `pwd` `ocamlfind printconf path`/aesq
 
 __ Examples __________________________________________________________
 
-Run the test by typing
+There's not much documentation right now, Run the test by typing
 
 > make test
 
-Of course you will need a device that can interpret ANSI
+and take a look at test.ml.
+
+Of course your output device must be able to interpret ANSI
 escape-sequences, otherwise the text will be garbled.
 
-Support for hyphenation is planned.
-
-Requires Extlib
-Based on lazy-list stream 
+Support for hyphenation is planned. I have not yet decided on a good
+interface, however. Maybe extending Text.raw with RWordBreak /
+RSoftHyphen would be a good idea. And then let Text.format handle
+the placement of hyphens. We'll see.
