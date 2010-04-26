@@ -1,5 +1,9 @@
 (* Kaspar Rohrer, Sat Mar 20 16:31:31 CET 2010 *)
 
+(** ANSI attributes / escape sequences *)
+
+(** {6 Types} *)
+
 type t
 type sequence = string
 

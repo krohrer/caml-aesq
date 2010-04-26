@@ -1,6 +1,6 @@
 (* Kaspar Rohrer, Tue Mar 23 06:47:43 CET 2010 *)
 
-(** Lazy streams with pattern matching*)
+(** Lazy lists *)
 
 exception Empty
 

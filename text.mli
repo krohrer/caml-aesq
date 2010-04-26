@@ -1,5 +1,7 @@
 (* Kaspar Rohrer, Fri Apr 23 00:11:57 CEST 2010 *)
 
+(** Text formatting and printing *)
+
 (** {6 Types} *)
 
 type size = int
@@ -58,6 +60,8 @@ val indent :
   ?fill:Ansi.t ->
   size ->
   line LazyList.t -> line LazyList.t
+
+(** {6 Printing} *)
 
 type printer
 
