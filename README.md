@@ -68,4 +68,4 @@ References
 
 * [Aesq][] - Source code repository for Aesq
 
-[Aesq]: http://github.com/krohrer/caml-inspect "Source code repostory"
+[Aesq]: http://github.com/krohrer/caml-aesq "Source code repostory"
