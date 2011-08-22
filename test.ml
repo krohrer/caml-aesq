@@ -1,3 +1,12 @@
+#use "topfind"
+#require "Aesq"
+#require "Inspect"
+
+open Aesq
+open Inspect
+
+let inspect x = Sexpr.dump x
+
 let random_element arr =
     fun () ->
       let i = Random.int (Array.length arr) in
@@ -10,19 +19,50 @@ let random_word =
     "ZORG";
     "FLOBNOCK";
     "BERZ";
-    "FOO" 
+    "FOO";
+    "FROBNICATED";
+    "WHALE";
+    "TIGERSHARK";
+    "LIVE";
+    "FROGS";
+    "EATEN";
+    "ALIVE";
+    "SQUIRMING";
   |]
 
 let random_attributes =
   random_element [|
     Ansi.make ();
     Ansi.make ~intensity:`bold ();
-    Ansi.make ~underline:`single ();
+    Ansi.make ~decoration:`underline ();
     Ansi.make ~foreground:`blue ~background:`yellow ();
-    Ansi.make ~background:`green ~underline:`single ();
+    Ansi.make ~background:`green ~decoration:`underline ();
     Ansi.make ~foreground:`red ~inverted:true ~intensity:`bold ();
-    Ansi.make ~foreground:`magenta ~underline:`single ()
+    Ansi.make ~foreground:`magenta ~decoration:`underline ()
   |]
+
+let random_color =
+  random_element Ansi.all_colors
+
+let random_decoration =
+  random_element Ansi.all_decorations
+
+let random_intensity =
+    random_element Ansi.all_intensities
+
+let random_attributes =
+  let intensity = random_intensity () and
+      decoration = random_decoration () and
+      foreground = random_color () and
+      background = random_color () and
+      inverted = Random.bool ()
+  in
+    Ansi.make
+      ~intensity
+      ~decoration
+      ~foreground
+      ~background
+      ~inverted
 
 let random_elem () =
   let r = Random.int 1000 in
@@ -38,16 +78,24 @@ let random_elem () =
 let rec random_stream i n =
   lazy begin
     if i < n then
-      LazyList.Cons (random_elem (), random_stream (i + 1) n)
+      LazyList.Cons (random_elem (),
+		     random_stream (i + 1) n)
     else
       LazyList.Nil
   end
 
+let rec random_stream_inf () =
+  lazy (LazyList.Cons (random_elem (),
+		       random_stream_inf ()))
+
 let _ = 
   Random.self_init ();
-  let s1 = random_stream 0 (1000) in
-  let s2 = random_stream 0 (700) in
-  let s3 = random_stream 0 (1000) in
+  ()
+
+  (*
+  let s1 = random_stream 0 (100000) in
+  let s2 = random_stream 0 (70000) in
+  let s3 = random_stream 0 (100000) in
   let nums01 =
     LazyList.append
       (LazyList.take 7 (LazyList.forever (Text.RFrag "0123456789")))
@@ -85,3 +133,4 @@ let _ =
 	print ~ansi:true;
 	print ~ansi:false;
 	()
+  *)

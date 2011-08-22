@@ -1,17 +1,22 @@
 (* Kaspar Rohrer, Thu Apr 22 17:08:01 CEST 2010 *)
 
+type color     = [ `black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default ]
+let all_colors = [|`black ; `red ; `green ; `yellow ; `blue ; `magenta ; `cyan ; `white ; `default|]
+
+type intensity      = [ `faint | `normal | `bold ]
+let all_intensities = [|`faint ; `normal ; `bold|] 
+
+type decoration     = [ `underline | `none ]
+let all_decorations = [|`underline ; `none|]
+
 type t = {
   intensity : intensity;
-  underline : underline;
+  decoration : decoration;
   inverted : bool;
   blink : bool;
   foreground : color;
   background : color;
 }
-
-and color = [`black | `red | `green | `yellow | `blue | `magenta | `cyan | `white | `default]
-and intensity = [`faint | `normal | `bold]
-and underline = [`single | `none]
 
 type sequence = string
 
@@ -21,9 +26,9 @@ let intensity_to_string =
     | `normal -> "normal"
     | `bold -> "bold"
 
-let underline_to_string =
+let decoration_to_string =
   function
-    | `single -> "single"
+    | `underline -> "underline"
     | `none -> "none"
 
 let color_to_string =
@@ -41,7 +46,7 @@ let color_to_string =
 let to_string c =
   Printf.sprintf "{I=%s,U=%s,N=%b,B=%b,Fg=%s,Bg=%s}" 
     (intensity_to_string c.intensity)
-    (underline_to_string c.underline)
+    (decoration_to_string c.decoration)
     c.inverted
     c.blink
     (color_to_string c.foreground)
@@ -49,14 +54,14 @@ let to_string c =
 
 let make
     ?(intensity=`normal)
-    ?(underline=`none)
+    ?(decoration=`none)
     ?(inverted=false)
     ?(blink=false)
     ?(foreground=`default)
     ?(background=`default)
     () = {
       intensity = intensity;
-      underline = underline;
+      decoration = decoration;
       inverted = inverted;
       blink = blink;
       foreground = foreground;
@@ -73,9 +78,9 @@ let code_of_intensity =
     | `normal -> 22
     | `faint -> 2
 
-let code_of_underline =
+let code_of_decoration =
   function
-    | `single -> 4 
+    | `underline -> 4 
     | `none -> 24
 
 let code_of_inverted =
@@ -110,7 +115,7 @@ let code_of_background c =
 
 let to_codes a =
   code_of_intensity a.intensity
-  :: code_of_underline a.underline
+  :: code_of_decoration a.decoration
   :: code_of_inverted a.inverted
   :: code_of_blink a.blink
   :: code_of_foreground a.foreground
@@ -126,7 +131,7 @@ let codes_of_transition a b =
       ()
   in
     aux code_of_intensity a.intensity b.intensity;
-    aux code_of_underline a.underline b.underline;
+    aux code_of_decoration a.decoration b.decoration;
     aux code_of_inverted a.inverted b.inverted;
     aux code_of_blink a.blink b.blink;
     aux code_of_foreground a.foreground b.foreground;
@@ -151,14 +156,14 @@ let sequence_of_codes codes =
 let reset_sequence = "\x1b[0m"
 
 let intensity a  = a.intensity
-let underline a  = a.underline
+let decoration a = a.decoration
 let inverted a   = a.inverted
 let blink a      = a.blink
 let foreground a = a.foreground
 let background a = a.background
 
 let set_intensity i a  = { a with intensity = i }
-let set_underline u a  = { a with underline = u }
+let set_decoration u a = { a with decoration = u }
 let set_inverted i a   = { a with inverted = i }
 let set_blink b a      = { a with blink = b }
 let set_foreground c a = { a with foreground = c }
