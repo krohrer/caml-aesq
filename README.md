@@ -24,6 +24,9 @@ provides a clean interface (based on the notion of text-attributes) to
 generate ANSI escape-sequences. It also supports text formatting with
 lazy lists composed of text elements.
 
+Future ideas include a [Markup](http://en.wikipedia.org/wiki/Markdown)
+parser and pretty printer for terminals and text modes.
+
 [Aesq][] was originally written by Kaspar M. Rohrer (<kaspar.rohrer@gmail.com>).
 
 Installation
